@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FreeBalls (Gravity Rotation)</title>
+  <!-- Matter.js via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #111;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(51, 51, 51, 0.4);
+      backdrop-filter: blur(8px);
+      padding: 15px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      color: #eee;
+      max-width: 250px;
+    }
+    #controls label {
+      display: block;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    #controls input[type="range"] {
+      width: 220px;
+      margin-top: 4px;
+    }
+    #controls button {
+      margin-top: 12px;
+      padding: 6px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      background: #007acc;
+      color: #fff;
+      transition: background 0.2s ease;
+    }
+    #controls button:hover {
+      background: #005fa3;
+    }
+    #fpsCounter {
+      display: inline-block;
+      margin-top: 12px;
+      margin-left: 10px;
+      font-weight: bold;
+    }
+    #deviceOrientationLabel {
+      display: inline-block;
+      margin-left: 8px;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label>Ball Count: <span id="ballCountLabel">500</span></label>
+    <input type="range" id="ballCountSlider" min="100" max="2000" value="500">
+
+    <label>Ball Size: <span id="ballSizeLabel">0.5</span></label>
+    <input type="range" id="ballSizeSlider" min="0.2" max="2.0" step="0.1" value="0.5">
+
+    <label>Attraction Radius: <span id="attractionRadiusLabel">150</span></label>
+    <input type="range" id="attractionRadiusSlider" min="50" max="500" value="150">
+
+    <label>Attraction Strength: <span id="attractionStrengthLabel">0.05</span></label>
+    <input type="range" id="attractionStrengthSlider" min="0.01" max="0.2" step="0.01" value="0.05">
+
+    <!-- Gravity angle slider -->
+    <label>Gravity Angle: <span id="gravityAngleValue">0</span>°</label>
+    <input type="range" id="gravityAngleSlider" min="-180" max="180" step="1" value="0">
+
+    <!-- Toggle device orientation usage -->
+    <label id="deviceOrientationLabel">
+      <input type="checkbox" id="useDeviceOrientation"> Use Device Orientation
+    </label>
+
+    <div>
+      <button id="startBtn">Start</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
+      <button id="resetColorsBtn">Reset Colors</button>
+      <span id="fpsCounter">FPS: 0</span>
+    </div>
+  </div>
+
+  <canvas id="world"></canvas>
+
+  <script>
+    // Matter.js aliases
+    const { Engine, Render, Runner, Composite, Bodies, Body, Vector, Events } = Matter;
+
+    // Layout constants
+    const MARGIN_PERCENT = 0.05;
+    const GAP = 2;
+
+    // Simulation variables
+    let engine, render, runner;
+    let balls = [];
+    let simulationStarted = false;
+    let paused = false;
+
+    // Default UI settings
+    let ballCount = 500;
+    let ballSizeFactor = 0.5;
+    let attractionRadius = 150;
+    let attractionStrength = 0.05;
+
+    // Gravity angle and orientation usage
+    let gravityAngle = 0; // degrees
+    let useDeviceOrient = false;
+
+    // UI elements
+    const ballCountSlider = document.getElementById('ballCountSlider');
+    const ballCountLabel = document.getElementById('ballCountLabel');
+    const ballSizeSlider = document.getElementById('ballSizeSlider');
+    const ballSizeLabel = document.getElementById('ballSizeLabel');
+    const attractionRadiusSlider = document.getElementById('attractionRadiusSlider');
+    const attractionRadiusLabel = document.getElementById('attractionRadiusLabel');
+    const attractionStrengthSlider = document.getElementById('attractionStrengthSlider');
+    const attractionStrengthLabel = document.getElementById('attractionStrengthLabel');
+
+    const gravityAngleSlider = document.getElementById('gravityAngleSlider');
+    const gravityAngleValue = document.getElementById('gravityAngleValue');
+    const useDeviceOrientationCheckbox = document.getElementById('useDeviceOrientation');
+
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const resetColorsBtn = document.getElementById('resetColorsBtn');
+    const fpsCounter = document.getElementById('fpsCounter');
+    const canvas = document.getElementById('world');
+
+    // Sliders
+    ballCountSlider.addEventListener('input', () => {
+      ballCount = parseInt(ballCountSlider.value, 10);
+      ballCountLabel.textContent = ballCount;
+    });
+    ballSizeSlider.addEventListener('input', () => {
+      ballSizeFactor = parseFloat(ballSizeSlider.value);
+      ballSizeLabel.textContent = ballSizeFactor;
+    });
+    attractionRadiusSlider.addEventListener('input', () => {
+      attractionRadius = parseInt(attractionRadiusSlider.value, 10);
+      attractionRadiusLabel.textContent = attractionRadius;
+    });
+    attractionStrengthSlider.addEventListener('input', () => {
+      attractionStrength = parseFloat(attractionStrengthSlider.value);
+      attractionStrengthLabel.textContent = attractionStrength.toFixed(2);
+    });
+
+    gravityAngleSlider.addEventListener('input', () => {
+      gravityAngle = parseInt(gravityAngleSlider.value, 10);
+      gravityAngleValue.textContent = gravityAngle;
+      // only apply if not using device orientation
+      if (!useDeviceOrient) {
+        applyGravityAngle(gravityAngle);
+      }
+    });
+
+    useDeviceOrientationCheckbox.addEventListener('change', () => {
+      useDeviceOrient = useDeviceOrientationCheckbox.checked;
+      if (!useDeviceOrient) {
+        // revert to gravityAngle slider
+        applyGravityAngle(gravityAngle);
+      }
+    });
+
+    // Buttons
+    startBtn.addEventListener('click', startSimulation);
+    pauseBtn.addEventListener('click', togglePause);
+    resetBtn.addEventListener('click', resetSimulation);
+    resetColorsBtn.addEventListener('click', recolorBalls);
+
+    // Mouse events
+    let isMouseDown = false;
+    let lastMousePos = null;
+    document.addEventListener('mousedown', (e) => {
+      isMouseDown = true;
+      lastMousePos = { x: e.clientX, y: e.clientY };
+    });
+    document.addEventListener('mouseup', () => {
+      isMouseDown = false;
+    });
+    document.addEventListener('mousemove', (e) => {
+      lastMousePos = { x: e.clientX, y: e.clientY };
+    });
+
+    // Listen for device orientation (mobile) events
+    window.addEventListener('deviceorientation', (event) => {
+      if (!useDeviceOrient || !simulationStarted) return;
+      // event.beta  => tilt front-back [-180,180]
+      // event.gamma => tilt left-right [-90,90]
+      // We can convert these to some x,y gravity
+      // For example, gamma ~ x axis, beta ~ y axis
+      // We clamp them from -90..90 => -1..1
+      const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+      // Convert tilt to fraction
+      const tiltX = clamp(event.gamma / 90, -1, 1);
+      const tiltY = clamp(event.beta / 90, -1, 1);
+
+      engine.world.gravity.x = tiltX;
+      engine.world.gravity.y = tiltY;
+    }, true);
+
+    // FPS tracking
+    let lastTimestamp = performance.now();
+    let frameCount = 0;
+    let dtAccumulator = 0;
+    function updateFps(dt) {
+      dtAccumulator += dt;
+      frameCount++;
+      if (dtAccumulator >= 1000) {
+        fpsCounter.textContent = `FPS: ${frameCount}`;
+        frameCount = 0;
+        dtAccumulator = 0;
+      }
+    }
+
+    // Speed optimization: skip velocity clamp every frame
+    let clampCounter = 0;
+
+    // Start the simulation
+    function startSimulation() {
+      if (simulationStarted) {
+        Composite.clear(engine.world, false);
+        Engine.clear(engine);
+        Render.stop(render);
+        Runner.stop(runner);
+        balls = [];
+        simulationStarted = false;
+        paused = false;
+        pauseBtn.textContent = 'Pause';
+      }
+
+      engine = Engine.create({ enableSleeping: true });
+      // reduce iteration counts for performance
+      engine.positionIterations = 6;
+      engine.velocityIterations = 4;
+
+      render = Render.create({
+        canvas: canvas,
+        engine: engine,
+        options: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          background: '#000',
+          wireframes: false,
+          pixelRatio: window.devicePixelRatio,
+          antialias: false
+        }
+      });
+      Render.run(render);
+
+      runner = Runner.create();
+      Runner.run(runner, engine);
+
+      Events.on(engine, 'beforeUpdate', () => {
+        if (clampCounter++ % 2 === 0) {
+          clampVelocities(10);
+        }
+        if (isMouseDown && lastMousePos) {
+          applyAttraction(lastMousePos);
+        }
+      });
+
+      createWalls();
+      createBalls();
+
+      // track fps
+      Events.on(render, 'afterRender', updateFps);
+
+      simulationStarted = true;
+
+      // if not using device orientation, apply the slider's angle
+      if (!useDeviceOrient) {
+        applyGravityAngle(gravityAngle);
+      }
+    }
+
+    function resetSimulation() {
+      startSimulation();
+    }
+
+    function togglePause() {
+      if (!simulationStarted) return;
+      paused = !paused;
+      if (paused) {
+        Runner.stop(runner);
+        pauseBtn.textContent = 'Resume';
+      } else {
+        Runner.run(runner, engine);
+        pauseBtn.textContent = 'Pause';
+      }
+    }
+
+    function recolorBalls() {
+      if (!simulationStarted || !balls.length) return;
+      const w = window.innerWidth;
+      balls.forEach(ball => {
+        const x = ball.position.x;
+        const hue = (x / w) * 360;
+        ball.render.fillStyle = `hsl(${hue}, 80%, 60%)`;
+      });
+    }
+
+    function clampVelocities(maxSpeed) {
+      balls.forEach(ball => {
+        const vx = ball.velocity.x;
+        const vy = ball.velocity.y;
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        if (speed > maxSpeed) {
+          ball.velocity.x = (vx / speed) * maxSpeed;
+          ball.velocity.y = (vy / speed) * maxSpeed;
+        }
+      });
+    }
+
+    // Let the user rotate gravity manually via angle slider
+    function applyGravityAngle(angleDeg) {
+      const angleRad = (angleDeg * Math.PI) / 180;
+      engine.world.gravity.x = Math.sin(angleRad);
+      engine.world.gravity.y = Math.cos(angleRad);
+    }
+
+    function createWalls() {
+      const thickness = 100;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const walls = [
+        Bodies.rectangle(w / 2, -thickness / 2, w, thickness, { isStatic: true }),
+        Bodies.rectangle(w / 2, h + thickness / 2, w, thickness, { isStatic: true }),
+        Bodies.rectangle(-thickness / 2, h / 2, thickness, h, { isStatic: true }),
+        Bodies.rectangle(w + thickness / 2, h / 2, thickness, h, { isStatic: true })
+      ];
+      Composite.add(engine.world, walls);
+    }
+
+    function createBalls() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const margin = w * MARGIN_PERCENT;
+      const columns = Math.ceil(Math.sqrt(ballCount));
+      const rows = Math.ceil(ballCount / columns);
+      const availableWidth = w - 2 * margin;
+      const ballDiameter = ((availableWidth - GAP * (columns - 1)) / columns) * ballSizeFactor;
+      const ballRadius = ballDiameter / 2;
+      const spacingX = ballDiameter + GAP;
+      const spacingY = ballDiameter + GAP;
+      const startX = margin + ballRadius;
+      const startY = margin + ballRadius;
+
+      for (let r = 0, count = 0; r < rows; r++) {
+        for (let c = 0; c < columns; c++) {
+          if (count >= ballCount) break;
+          const jitterX = (Math.random() - 0.5);
+          const jitterY = (Math.random() - 0.5);
+          const x = startX + c * spacingX + jitterX;
+          const y = startY + r * spacingY + jitterY;
+          const hue = (x / w) * 360;
+          const color = `hsl(${hue}, 80%, 60%)`;
+
+          const ball = Bodies.circle(x, y, ballRadius, {
+            restitution: 0.7,
+            friction: 0,
+            sleepThreshold: 200,
+            render: {
+              fillStyle: color
+            }
+          });
+          balls.push(ball);
+          Composite.add(engine.world, ball);
+          count++;
+        }
+      }
+    }
+
+    function applyAttraction(mousePos) {
+      balls.forEach(ball => {
+        const diff = Vector.sub(mousePos, ball.position);
+        const d = Vector.magnitude(diff);
+        if (d < attractionRadius && d > 0) {
+          let forceMagnitude = attractionStrength * (1 - d / attractionRadius);
+          const maxForce = 0.02;
+          if (forceMagnitude > maxForce) forceMagnitude = maxForce;
+          const force = Vector.mult(Vector.normalise(diff), forceMagnitude);
+          Body.applyForce(ball, ball.position, force);
+        }
+      });
+    }
+
+    function initUI() {
+      // Already set up event listeners
+    }
+    function loadSettings() {
+      ballCountSlider.value = ballCount;
+      ballCountLabel.textContent = ballCount;
+      ballSizeSlider.value = ballSizeFactor;
+      ballSizeLabel.textContent = ballSizeFactor;
+      attractionRadiusSlider.value = attractionRadius;
+      attractionRadiusLabel.textContent = attractionRadius;
+      attractionStrengthSlider.value = attractionStrength;
+      attractionStrengthLabel.textContent = attractionStrength.toFixed(2);
+      gravityAngleValue.textContent = gravityAngleSlider.value;
+    }
+
+    // Start everything on page load
+    loadSettings();
+    initUI();
+  </script>
+</body>
+</html>
