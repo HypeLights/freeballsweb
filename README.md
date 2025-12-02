@@ -1,10 +1,10 @@
-# FreeBallsGPU
+# FreeBalls Web
 
 ![Version](https://img.shields.io/badge/version-1.0-blue.svg)
 ![WebGPU](https://img.shields.io/badge/WebGPU-Enabled-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
-**FreeBallsGPU** is a high-performance, GPU-accelerated physics simulation running in the browser. Built with **WebGPU** and the **Augmented Vertex Block Descent (AVBD)** algorithm, it simulates tens of thousands of interacting particles in real-time with soft-body dynamics and friction.
+**FreeBalls Web** is a high-performance, GPU-accelerated physics simulation running in the browser. Built with **WebGPU** and the **Augmented Vertex Block Descent (AVBD)** algorithm, it simulates tens of thousands of interacting particles in real-time with soft-body dynamics and friction.
 
 > **Note**: This application requires a browser with WebGPU support (e.g., Chrome 113+, Edge, or Firefox Nightly).
 
