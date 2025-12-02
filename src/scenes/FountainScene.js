@@ -18,7 +18,7 @@ export class FountainScene extends Scene {
     update(dt) {
         if (this.solver.paused) return;
 
-        const rate = 500; // particles per second
+        const rate = this.solver.fountainSpawnRate || 500; // particles per second
         if (!this.solver.spawnAccumulator) this.solver.spawnAccumulator = 0;
         this.solver.spawnAccumulator += rate * dt;
 

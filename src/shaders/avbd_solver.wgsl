@@ -409,32 +409,29 @@ fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
             let dir = normalize(toCenter);
             // F = G * M / r^2. 
             // Newtonian Gravity (Keplerian orbits)
-            // Constant tuned for G=4.0 and typical screen distances (100-500px)
-            // Use simParams.blackHoleGravity instead of simParams.gravity
-            // SWITCH BACK TO 1/r GRAVITY for better screen containment
-            // F = G / r
-            // This creates a "Logarithmic Potential" where orbital velocity is constant.
-            // Much better for keeping particles on screen.
-            let force = dir * (simParams.blackHoleGravity * 5000000.0) / (dist + 10.0); 
+            // User requested "real gravity" and "proper circular fall off".
+            // We use a softener (dist^2 + 100.0) to avoid singularity.
+            // Multiplied constant by 300.0 to compensate for r^2 falloff at typical screen scales.
+            let force = dir * (simParams.blackHoleGravity * 5000.0 * 300.0) / (dist * dist + 100.0); 
             
             // Tangential "Swirl" Force
             // Hybrid: Constant base (for outer) + Strong 1/r (for inner)
             // "Much stronger toward inside"
             let tangent = vec2<f32>(-dir.y, dir.x);
             let baseSwirl = 100.0;
-            let innerSwirl = 200000.0 / (dist + 10.0);
-            let swirl = tangent * (simParams.blackHoleSwirl * (baseSwirl + innerSwirl));
+            let innerSwirl = 2000.0 / (dist + 10.0);
+            let swirl = tangent * (simParams.blackHoleSwirl * (baseSwirl + innerSwirl) * 50.0);
 
             // Repulsion Force (Restored & Boosted)
             // User said it "is just more gravity" -> Fixed direction to be OUTWARDS (-dir).
             // F = k / r (1/r falloff to match gravity range)
-            let repulsion = -dir * (simParams.blackHoleRepulsion * 20000000.0) / (dist + 10.0);
+            let repulsion = -dir * (simParams.blackHoleRepulsion * 2000.0) / (dist + 10.0);
 
             gravityForce = force + swirl + repulsion;
         } else {
             // Inside Event Horizon: Slingshot!
             // Apply massive gravity to accelerate them through
-             let force = normalize(toCenter) * (simParams.blackHoleGravity * 5000000.0) / (max(dist, 10.0) + 10.0);
+             let force = normalize(toCenter) * (simParams.blackHoleGravity * 50.0) / (max(dist, 10.0) + 10.0);
              gravityForce = force;
         }
     }

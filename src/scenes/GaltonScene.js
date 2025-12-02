@@ -5,6 +5,14 @@ export class GaltonScene extends Scene {
         // Clear obstacles first
         this.solver.obstacleCount = 0;
 
+        // Reset Physics Defaults
+        this.solver.gravity = 4.0;
+        this.solver.restitution = 0.8;
+        this.solver.damping = 0.999;
+        this.solver.substeps = 32;
+        this.solver.ballRadius = 7.0;
+        this.solver.galtonSpawnRate = 10;
+
         const pegRadius = this.solver.galtonPegSize || 3.0;
         const pegSpacingX = 30;
         const pegSpacingY = 30;
@@ -54,19 +62,25 @@ export class GaltonScene extends Scene {
         this.solver.emittedCount = 0;
 
         // 2. Create Buckets
-        const bucketSpacing = this.solver.galtonBucketSpacing || 40;
-        const bucketCols = Math.ceil(window.innerWidth / bucketSpacing) + 2;
-        const totalBucketWidth = bucketCols * bucketSpacing;
-        const bucketStartX = (window.innerWidth - totalBucketWidth) / 2;
+        const targetSpacing = this.solver.galtonBucketSpacing || 40;
+        // Calculate number of bins that fit in the screen
+        const numBins = Math.round(window.innerWidth / targetSpacing);
+        // Recalculate exact spacing to fit perfectly
+        const actualSpacing = window.innerWidth / numBins;
+
         const bucketWidth = 8; // Thicker walls
+        const numWalls = numBins + 1; // Walls are fences between bins
 
         const obstacleData = new Float32Array(this.solver.maxObstacles * 8);
+        // Zero out the buffer on GPU to prevent ghosts
+        this.solver.device.queue.writeBuffer(this.solver.obstacleBuffer, 0, obstacleData);
+
         this.solver.obstacleCount = 0;
 
-        for (let i = 0; i < bucketCols; i++) {
-            const wallX = bucketStartX + i * bucketSpacing;
-
-            if (wallX < -50 || wallX > window.innerWidth + 50) continue;
+        for (let i = 0; i < numWalls; i++) {
+            // Place walls exactly at division points
+            // i=0 is left edge (0), i=numBins is right edge (width)
+            const wallX = i * actualSpacing;
 
             this.solver.addObstacle(
                 obstacleData,

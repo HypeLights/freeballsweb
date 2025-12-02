@@ -188,41 +188,47 @@ export class FireworksScene extends Scene {
         this.solver.damping = 0.96; // Good air resistance
         this.solver.restitution = 0.5;
 
-        // User Request: Default ball size 2.5
-        this.solver.ballRadius = 2.5;
-        this.solver.cellSize = Math.max(20, 2.5 * 2.5); // Update grid cell size
+        // User Request: Default ball size 2.0
+        // Only apply if it's the generic default (10).
+        // This allows users to keep custom values on Reset.
+        if (this.solver.ballRadius === 10) {
+            this.solver.ballRadius = 2.0;
+        }
+        this.solver.cellSize = Math.max(20, this.solver.ballRadius * 2.5);
 
         // Initialize all particles far away (hidden)
+        // CRITICAL: Set them to NaN or very far to prevent startup glitch
         for (let i = 0; i < this.solver.particleCount; i++) {
             const offset = i * 10;
-            data[offset + 0] = -1000; // Off screen
-            data[offset + 1] = -1000;
+            data[offset + 0] = -10000; // Far off screen
+            data[offset + 1] = -10000;
             data[offset + 2] = 0;
             data[offset + 3] = 0;
-            data[offset + 4] = 2.5;
+            data[offset + 4] = this.solver.ballRadius;
             dataUint[offset + 5] = 0;
             data[offset + 6] = 1;
-            data[offset + 7] = 0; // Static initially to save perf? No, just let them sit.
+            data[offset + 7] = 0;
         }
-        this.solver.emittedCount = this.solver.particleCount;
+        // Initial emitted count is 0 because they are all hidden
+        this.solver.emittedCount = 0;
 
-        // Pool Management
-        this.availableIndices = [];
-        for (let i = 0; i < this.solver.particleCount; i++) {
-            this.availableIndices.push(i);
-        }
+        // Pool Management: Circular Buffer
+        // We don't "reclaim" indices anymore. We just take the next available one.
+        // This ensures particles stay alive until we overwrite them.
+        this.nextParticleIndex = 0;
 
         this.activeFireworks = [];
         this.spawnTimer = 0;
     }
 
     update(dt) {
+        if (this.solver.paused) return;
+
         // 1. Spawn Logic
         this.spawnTimer += dt;
 
         // Use user setting: spawnRate (bursts per second)
-        // Default 1.0 -> 1 burst per second
-        const rate = this.solver.fireworksSpawnRate || 1.0;
+        const rate = this.solver.fireworksSpawnRate || 3.0;
         const interval = 1.0 / rate;
 
         // Add some randomness to interval
@@ -232,18 +238,21 @@ export class FireworksScene extends Scene {
         }
 
         // 2. Update Active Fireworks
+        let liveCount = 0;
         for (let i = this.activeFireworks.length - 1; i >= 0; i--) {
             const fw = this.activeFireworks[i];
             fw.update(dt);
 
             if (fw.state === 'DEAD') {
-                // Reclaim indices
-                for (const idx of fw.indices) {
-                    this.availableIndices.push(idx);
-                }
+                // We don't need to reclaim indices. They are just forgotten.
                 this.activeFireworks.splice(i, 1);
+            } else {
+                liveCount += fw.indices.length;
             }
         }
+
+        // Update solver emitted count for UI display
+        this.solver.emittedCount = liveCount;
     }
 
     spawnFirework() {
@@ -252,11 +261,36 @@ export class FireworksScene extends Scene {
         // Randomize size around base
         const size = Math.floor(baseSize * (0.8 + Math.random() * 0.4));
 
-        if (this.availableIndices.length < size) return;
+        // CRITICAL: Check against "Max Balls" slider (solver.particleCount)
+        // If adding this firework would exceed the user's set limit, don't spawn it.
+        // Also check against hard buffer limit.
+        let currentLiveCount = this.solver.emittedCount || 0;
+        const maxUserParticles = this.solver.particleCount;
 
+        // Force Spawn Logic:
+        // If adding this firework exceeds the limit, remove the oldest fireworks until we have room.
+        // This ensures the flow is never disrupted by a hard limit.
+        while (currentLiveCount + size > maxUserParticles && this.activeFireworks.length > 0) {
+            const oldest = this.activeFireworks.shift(); // Remove oldest
+            currentLiveCount -= oldest.indices.length;
+            // Oldest is now garbage collected and won't update anymore.
+            // Its GPU particles will be overwritten by the circular buffer eventually.
+        }
+
+        // Get indices from circular buffer
         const indices = [];
+        // CRITICAL: Ensure we don't exceed the actual GPU buffer size
+        // The solver has a hard maxParticles limit (300,000)
+        const maxBufferParticles = Math.floor(this.solver.particleBuffer.size / 40);
+
         for (let i = 0; i < size; i++) {
-            indices.push(this.availableIndices.pop());
+            // Safety check: wrap around maxBufferParticles
+            if (this.nextParticleIndex >= maxBufferParticles) {
+                this.nextParticleIndex = 0;
+            }
+
+            indices.push(this.nextParticleIndex);
+            this.nextParticleIndex = (this.nextParticleIndex + 1) % maxBufferParticles;
         }
 
         const width = window.innerWidth;

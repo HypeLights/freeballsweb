@@ -3,11 +3,10 @@ import { GridScene } from '../scenes/GridScene.js';
 import { ChaosScene } from '../scenes/ChaosScene.js';
 import { GaltonScene } from '../scenes/GaltonScene.js';
 import { FountainScene } from '../scenes/FountainScene.js';
-import { BlackHoleScene } from '../scenes/BlackHoleScene.js';
 import { CollisionScene } from '../scenes/CollisionScene.js';
-import { PlanetaryScene } from '../scenes/PlanetaryScene.js';
 import { FireworksScene } from '../scenes/FireworksScene.js';
 import { LatticeScene } from '../scenes/LatticeScene.js';
+import { WaveScene } from '../scenes/WaveScene.js';
 
 export class AVBDSolver {
     constructor(gpuContext) {
@@ -21,18 +20,17 @@ export class AVBDSolver {
             'chaos': new ChaosScene(this),
             'galton': new GaltonScene(this),
             'fountain': new FountainScene(this),
-            'blackhole': new BlackHoleScene(this),
             'collision': new CollisionScene(this),
-            'planetary': new PlanetaryScene(this),
             'fireworks': new FireworksScene(this),
-            'lattice': new LatticeScene(this)
+            'lattice': new LatticeScene(this),
+            'wave': new WaveScene(this)
         };
         this.currentSceneObject = this.scenes['grid'];
 
         // Simulation Parameters
         this.maxParticles = 300000;
         this.particleCount = 4000; // Updated to match UI default
-        this.maxObstacles = 200; // Increased to allow full screen of buckets
+        this.maxObstacles = 1000; // Increased to allow full screen of buckets
         this.obstacleCount = 0;
         this.gravity = 4.0; // Scaled in shader
         this.gravityType = 0; // 0 = Down, 1 = Center
@@ -50,7 +48,7 @@ export class AVBDSolver {
         this.ballRadius = 10; // Increased default radius
 
         // Interaction Parameters
-        this.mousePower = 50;
+        this.mousePower = 250;
         this.mouseRadius = 200;
 
         // Galton Scene Parameters
@@ -63,6 +61,9 @@ export class AVBDSolver {
         this.fireworksExplosionSize = 100;
         this.fireworksRocketSpeed = 1.5;
         this.fireworksExplosionSpeed = 1.0;
+
+        // Planetary Parameters
+        this.planetaryBallVariance = 0.5;
 
         // Render Parameters
         this.bloomEnabled = true;
@@ -909,95 +910,7 @@ export class AVBDSolver {
         return ((ir << 16) | (ig << 8) | ib) >>> 0;
     }
 
-    initGaltonScene(data, dataUint) {
-        // Clear obstacles first
-        this.obstacleCount = 0;
 
-        const pegRadius = this.galtonPegSize || 3.0;
-        const pegSpacingX = 30;
-        const pegSpacingY = 30;
-        const startY = 150;
-
-        // Bucket Settings
-        // Default bucket height to 1/3 of screen if not set, or use slider value
-        const bucketHeight = this.galtonBucketHeight || (window.innerHeight * 0.4);
-        const bucketY = window.innerHeight - bucketHeight;
-
-        // Calculate Peg Count dynamically based on available space
-        // Leave some buffer between pegs and buckets
-        const availableHeight = bucketY - startY - 50;
-        const rows = Math.floor(availableHeight / pegSpacingY);
-
-        const cols = Math.floor(window.innerWidth / pegSpacingX);
-        const pegCount = rows * cols;
-        const startX = (window.innerWidth - (cols * pegSpacingX)) / 2;
-
-        let index = 0;
-
-        // 1. Create Pegs (Static)
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                // If we run out of space, we MUST stop.
-                if (index >= this.maxParticles) {
-                    console.error("CRITICAL: Galton Peg Loop ran out of buffer space! Increase safety margin.");
-                    break;
-                }
-
-                const offset = index * 10;
-                const stagger = (r % 2) * (pegSpacingX / 2);
-
-                data[offset + 0] = startX + c * pegSpacingX + stagger;
-                data[offset + 1] = startY + r * pegSpacingY;
-                data[offset + 2] = 0;
-                data[offset + 3] = 0;
-                data[offset + 4] = pegRadius;
-                dataUint[offset + 5] = 0x555555; // Gray
-                data[offset + 6] = 0.0; // Static
-                data[offset + 7] = 0.0;
-                data[offset + 8] = 0; // Circle
-                data[offset + 9] = 0;
-
-                index++;
-            }
-        }
-
-        this.staticCount = index;
-        this.emittedCount = 0;
-
-        // 2. Create Buckets
-        // Use slider for bucket spacing, default to 40
-        const bucketSpacing = this.galtonBucketSpacing || 40;
-
-        // Fill the entire screen width with buckets
-        const bucketCols = Math.ceil(window.innerWidth / bucketSpacing) + 2;
-
-        // Center the buckets roughly
-        const totalBucketWidth = bucketCols * bucketSpacing;
-        const bucketStartX = (window.innerWidth - totalBucketWidth) / 2;
-
-        const bucketWidth = 8; // Thicker walls
-
-        const obstacleData = new Float32Array(this.maxObstacles * 8);
-        this.obstacleCount = 0;
-
-        for (let i = 0; i < bucketCols; i++) {
-            const wallX = bucketStartX + i * bucketSpacing;
-
-            if (wallX < -50 || wallX > window.innerWidth + 50) continue;
-
-            this.addObstacle(
-                obstacleData,
-                wallX, bucketY + bucketHeight / 2,
-                bucketWidth / 2, bucketHeight / 2,
-                0
-            );
-        }
-        // Bottom wall removed as requested
-        // Rely on screen borders (handled in solver shader/logic)
-
-        // Upload Obstacles
-        this.device.queue.writeBuffer(this.obstacleBuffer, 0, obstacleData.slice(0, this.obstacleCount * 8));
-    }
 
     // getRainbowColor removed. Use getColor(index, total) instead.
 
@@ -1232,8 +1145,8 @@ export class AVBDSolver {
             this.restitution,   // Restitution
             mouse.x,
             mouse.y,
-            mouse.radius || 100,
-            mouse.power || 50,
+            this.mouseRadius || 200,
+            this.mousePower || 50,
             mouse.dx || 0,
             mouse.dy || 0
         ]);

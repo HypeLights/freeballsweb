@@ -101,6 +101,20 @@ function setupInput() {
         e.preventDefault();
         const delta = Math.sign(e.deltaY) * -20;
         mouse.radius = Math.max(50, Math.min(600, mouse.radius + delta));
+
+        // Sync with Solver and UI
+        if (solver) {
+            solver.mouseRadius = mouse.radius;
+
+            // Update UI Slider
+            const slider = document.getElementById('inp-mouse-radius');
+            const label = document.getElementById('val-mouse-radius');
+            if (slider && label) {
+                slider.value = mouse.radius;
+                label.textContent = mouse.radius;
+            }
+        }
+
         updateMouseVisual();
         showRadiusFeedback();
     }, { passive: false });

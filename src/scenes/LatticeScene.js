@@ -37,9 +37,12 @@ export class LatticeScene extends Scene {
 
                 // Color Gradient based on position
                 // X -> Hue, Y -> Lightness
-                const hue = (x / width) * 360;
-                const light = 0.3 + (y / height) * 0.4;
-                const color = this.solver.hslToRgb(hue, 1.0, light);
+                // const hue = (x / width) * 360;
+                // const light = 0.3 + (y / height) * 0.4;
+                // const color = this.solver.hslToRgb(hue, 1.0, light);
+
+                // Use Global Theme
+                const color = this.solver.getColor(index, this.solver.particleCount);
 
                 this.addParticle(index, x, y, 0, 0, r, color);
                 index++;
