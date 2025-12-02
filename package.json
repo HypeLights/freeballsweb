@@ -1,0 +1,12 @@
+{
+  "name": "freeballsgpu",
+  "version": "1.0.0",
+  "description": "GPU-accelerated particle simulation",
+  "main": "main.js",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
