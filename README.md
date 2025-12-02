@@ -4,14 +4,14 @@
 ![WebGPU](https://img.shields.io/badge/WebGPU-Enabled-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
-**FreeBalls Web** is a high-performance, GPU-accelerated physics simulation running in the browser. Built with **WebGPU** and the **Augmented Vertex Block Descent (AVBD)** algorithm, it simulates tens of thousands of interacting particles in real-time with soft-body dynamics and friction.
+**FreeBalls Web** is a high-performance, GPU-accelerated physics simulation running in the browser. Built with **WebGPU** and the **Augmented Vertex Block Descent (AVBD)** algorithm, it simulates tens of thousands of interacting particles in real-time.
 
 > **Note**: This application requires a browser with WebGPU support (e.g., Chrome 113+, Edge, or Firefox Nightly).
 
 ## Features
 
 ### Massive Scale Simulation
-- Simulate **up to 100,000+ particles** at 60 FPS.
+- Simulate **up to 100,000+ particles** at 60 FPS. (depends on the pc, 3080ti for me)
 - All physics calculations (collision, constraints, integration) run entirely on the GPU via Compute Shaders.
 
 ### Interactive Scenes
