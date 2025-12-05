@@ -5,8 +5,8 @@ export class ChaosScene extends Scene {
         this.solver.obstacleCount = 0;
 
         for (let i = 0; i < this.solver.particleCount; i++) {
-            const x = Math.random() * window.innerWidth;
-            const y = Math.random() * window.innerHeight;
+            const x = Math.random() * this.solver.width;
+            const y = Math.random() * this.solver.height;
             const vx = (Math.random() - 0.5) * 500;
             const vy = (Math.random() - 0.5) * 500;
             const color = this.solver.getColor(i, this.solver.particleCount);

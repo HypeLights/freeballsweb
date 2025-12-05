@@ -65,6 +65,8 @@ Adjust simulation parameters during runtime:
 - **WebGPU API**: Graphics and compute API for the web.
 - **WGSL (WebGPU Shading Language)**: Compute shaders for the physics solver.
 - **AVBD Algorithm**: Physics solver combining position-based dynamics with variational integrators.
+- **Node.js**: Runtime environment for local development and tooling.
+
 
 ## Credits & Inspiration
 

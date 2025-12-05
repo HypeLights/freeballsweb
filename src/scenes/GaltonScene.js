@@ -19,15 +19,15 @@ export class GaltonScene extends Scene {
         const startY = 150;
 
         // Bucket Settings
-        const bucketHeight = this.solver.galtonBucketHeight || (window.innerHeight * 0.4);
-        const bucketY = window.innerHeight - bucketHeight;
+        const bucketHeight = this.solver.galtonBucketHeight || (this.solver.height * 0.4);
+        const bucketY = this.solver.height - bucketHeight;
 
         // Calculate Peg Count dynamically based on available space
         const availableHeight = bucketY - startY - 50;
         const rows = Math.floor(availableHeight / pegSpacingY);
 
-        const cols = Math.floor(window.innerWidth / pegSpacingX);
-        const startX = (window.innerWidth - (cols * pegSpacingX)) / 2;
+        const cols = Math.floor(this.solver.width / pegSpacingX);
+        const startX = (this.solver.width - (cols * pegSpacingX)) / 2;
 
         let index = 0;
 
@@ -64,9 +64,9 @@ export class GaltonScene extends Scene {
         // 2. Create Buckets
         const targetSpacing = this.solver.galtonBucketSpacing || 40;
         // Calculate number of bins that fit in the screen
-        const numBins = Math.round(window.innerWidth / targetSpacing);
+        const numBins = Math.round(this.solver.width / targetSpacing);
         // Recalculate exact spacing to fit perfectly
-        const actualSpacing = window.innerWidth / numBins;
+        const actualSpacing = this.solver.width / numBins;
 
         const bucketWidth = 8; // Thicker walls
         const numWalls = numBins + 1; // Walls are fences between bins
@@ -130,7 +130,7 @@ export class GaltonScene extends Scene {
                 const updateDataUint = new Uint32Array(updateBuffer);
 
                 // Ensure centerX is based on current window width
-                const centerX = window.innerWidth / 2;
+                const centerX = this.solver.width / 2;
                 const spread = this.solver.galtonSpawnerDistance || 100;
 
                 // 3 Spawner Positions (Top Middle)

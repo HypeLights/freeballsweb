@@ -8,454 +8,360 @@ struct Particle {
     padding: vec2<f32>
 };
 
-struct GridParams {
-    width: f32,
-    height: f32,
-    cellSize: f32,
-    cols: u32,
-    rows: u32,
-    maxParticles: u32
-};
-
 struct SimParams {
     dt: f32,
     gravity: f32,
     damping: f32,
     restitution: f32,
-    mousePos: vec2<f32>,
+    mouseX: f32,
+    mouseY: f32,
     mouseRadius: f32,
     mousePower: f32,
-    mouseDelta: vec2<f32>,
+    mouseDx: f32,
+    mouseDy: f32,
     mouseButton: u32,
     iterations: u32,
-    alpha: f32, // Softness parameter
+    alpha: f32,
     obstacleCount: u32,
-    gravityType: u32, // 0 = Down, 1 = Center
+    gravityType: u32,
     blackHoleGravity: f32,
     blackHoleSwirl: f32,
     blackHoleRadius: f32,
-    blackHoleRepulsion: f32
+    blackHoleRepulsion: f32,
+    beta: f32
+};
+
+struct GridParams {
+    width: f32,
+    height: f32,
+    cellSize: f32,
+    gridCols: u32,
+    gridRows: u32,
+    maxParticles: u32,
+    galtonSpawnerDistance: f32,
+    padding: f32
 };
 
 struct Obstacle {
     pos: vec2<f32>,
     halfSize: vec2<f32>,
     rotation: f32,
-    padding: vec3<f32> // Align to 32 bytes (2+2+1+3 = 8 floats)
+    color: u32,
+    pad1: f32,
+    pad2: f32
+};
+
+struct WallLambda {
+    lambdaX: f32,
+    lambdaY: f32,
+    stiffness: f32,
+    padding: f32
 };
 
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
-@group(0) @binding(1) var<storage, read_write> gridCounters: array<atomic<u32>>;
-@group(0) @binding(2) var<storage, read> gridCells: array<u32>;
+@group(0) @binding(1) var<storage, read_write> gridCounters: array<atomic<u32>>; // Not used in solver, but needed for bind group layout
+@group(0) @binding(2) var<storage, read_write> gridCells: array<u32>;
 @group(0) @binding(3) var<uniform> gridParams: GridParams;
 @group(0) @binding(4) var<uniform> simParams: SimParams;
 @group(0) @binding(5) var<storage, read> obstacles: array<Obstacle>;
+@group(0) @binding(6) var<storage, read_write> wallLambdas: array<WallLambda>;
 
-const MAX_PER_CELL: u32 = 256;
+const PI: f32 = 3.14159265359;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
-    let index = GlobalInvocationID.x;
-    if (index >= gridParams.maxParticles) {
-        return;
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    if (idx >= gridParams.maxParticles) { return; }
+
+    var p = particles[idx];
+    if (p.invMass == 0.0) { return; } // Static particle
+
+    // 1. Inertial Target (y)
+    // y = x + v * dt + g * dt^2
+    // We apply gravity here.
+    
+    var gravity = vec2<f32>(0.0, simParams.gravity);
+    if (simParams.gravityType == 1u) {
+        // Center gravity
+        let center = vec2<f32>(gridParams.width * 0.5, gridParams.height * 0.5);
+        let dir = center - p.pos;
+        let dist = length(dir);
+        if (dist > 1.0) {
+            gravity = normalize(dir) * simParams.gravity;
+        }
     }
 
-    var p = particles[index];
-    
-    // Skip static particles
-    if (p.invMass == 0.0) {
-        return;
+    // Black Hole Logic
+    if (simParams.blackHoleGravity > 0.0) {
+        let center = vec2<f32>(gridParams.width * 0.5, gridParams.height * 0.5);
+        let dir = center - p.pos;
+        let dist = length(dir);
+        
+        // Pull
+        gravity += normalize(dir) * simParams.blackHoleGravity * 100.0;
+        
+        // Swirl (Tangential)
+        let tangent = vec2<f32>(-dir.y, dir.x);
+        gravity += normalize(tangent) * simParams.blackHoleSwirl * 50.0;
+
+        // Repulsion (Event Horizon)
+        if (dist < simParams.blackHoleRadius) {
+             gravity -= normalize(dir) * simParams.blackHoleRepulsion * 500.0;
+        }
     }
 
-    let dt = simParams.dt;
-    let mass = p.mass; // Assuming mass = 1/invMass, or stored. Let's use 1.0 for now if not stored.
-    // Actually p.mass is in struct.
-    
-    // --- Pre-Solve Restitution (Momentum Transfer) ---
-    // Apply elastic impulses to velocity BEFORE predicting position 'y'.
-    // This ensures the solver tries to reach the 'bounced' position.
-    let cellX = i32(p.pos.x / gridParams.cellSize);
-    let cellY = i32(p.pos.y / gridParams.cellSize);
-
-    for (var cy = -1; cy <= 1; cy++) {
-        for (var cx = -1; cx <= 1; cx++) {
-            let neighborX = cellX + cx;
-            let neighborY = cellY + cy;
+    // Mouse Interaction (Add to gravity/force)
+    if (simParams.mouseButton > 0u) {
+        let mousePos = vec2<f32>(simParams.mouseX, simParams.mouseY);
+        let dir = mousePos - p.pos;
+        let dist = length(dir);
+        
+        if (dist < simParams.mouseRadius) {
+            let strength = (1.0 - dist / simParams.mouseRadius) * simParams.mousePower * 10.0;
             
-            if (neighborX >= 0 && neighborX < i32(gridParams.cols) && neighborY >= 0 && neighborY < i32(gridParams.rows)) {
-                let cellIndex = u32(neighborY) * gridParams.cols + u32(neighborX);
-                let count = min(atomicLoad(&gridCounters[cellIndex]), MAX_PER_CELL);
+            if (simParams.mouseButton == 1u) { // Left Click: Pull
+                gravity += normalize(dir) * strength;
+            } else if (simParams.mouseButton == 3u) { // Right Click: Push
+                gravity -= normalize(dir) * strength;
+            }
+        }
+    }
+
+    // Predict Position y
+    let dt = simParams.dt;
+    let y = p.pos + p.vel * dt + gravity * dt * dt;
+    
+    // Initialize Solver State
+    var x = y; // Start at inertial target (or warm start?)
+    // AVBD Paper: x starts at y, then we solve.
+    // Actually, for warm start, we might want to start at x_prev + v*dt? That IS y.
+    
+    // Load Persistent Wall Lambdas
+    var wLambda = wallLambdas[idx];
+    var k_wall = wLambda.stiffness;
+    if (k_wall == 0.0) { k_wall = 100.0; } // Initial stiffness
+    var lambda_wall = vec2<f32>(wLambda.lambdaX, wLambda.lambdaY);
+
+    // Warm Start: Apply previous frame's wall force immediately?
+    // In AVBD, we solve H dx = f. The force f includes lambda.
+    // But here we are doing an iterative update of x directly.
+    // x_new = (x_inertial + ... forces ...) / mass_term
+    
+    // We will use a "Position-Based" approach with AVBD augmentation.
+    // Minimize 0.5*M/dt^2 ||x - y||^2 + E(x)
+    // Gradient: M/dt^2 (x - y) + k C gradC + lambda gradC = 0
+    // x = y - (dt^2/M) * (k C + lambda) gradC
+    
+    // We iterate this.
+    
+    for (var iter = 0u; iter < simParams.iterations; iter++) {
+        var dx_total = vec2<f32>(0.0, 0.0);
+        var mass_eff = p.mass; // Effective mass (simplification)
+
+        // 2. Wall Constraints
+        // C(x) = x - clamp(x, min, max)
+        // We handle 4 walls.
+        
+        // Floor
+        let groundY = gridParams.height - p.radius;
+        var C = x.y - groundY;
+        if (C > 0.0) { // Penetration (y is down)
+             // Gradient is (0, 1)
+             // Force mag = k * C + lambda
+             // We want to push UP (negative Y)
+             // Wait, C > 0 means we are BELOW the floor.
+             // We need to move to groundY.
+             // Correction = -C
+             
+             // AVBD Update:
+             // lambda_new = lambda + k * C
+             // k_new = k + beta * C
+             
+             // Apply correction to x
+             // x -= (k * C + lambda) / (M/dt^2 + k) * gradC
+             // This is the Newton Step.
+             
+             // Simplified PBD-style with AVBD terms:
+             // The "stiffness" k acts as a weight.
+             // If k is huge, we move exactly to surface.
+             
+             // Let's use the explicit update rule from the paper:
+             // x = x - H^-1 * grad E
+             // H approx = M/dt^2 + k
+             // grad E = M/dt^2(x-y) + k*C + lambda
+             
+             // But we are doing this iteratively.
+             // Let's just accumulate the correction vector.
+             
+             // For walls, it's simpler.
+             // Just project?
+             // No, we need the "stickiness" of lambda for friction/stacking.
+             // But for a simple floor, hard constraint is fine.
+             // AVBD is specifically for "Hard Constraints" that VBD fails at.
+             
+             // Let's implement the ramping logic.
+             let compliance = 1.0 / (k_wall * dt * dt); // alpha in XPBD terms
+             let dLambda = (-C - compliance * lambda_wall.y) / (p.invMass + compliance);
+             
+             // Update Position
+             // x.y += dLambda * p.invMass; // This is XPBD
+             
+             // AVBD way:
+             // Update x based on current k and lambda.
+             // Then update k and lambda.
+             
+             let force = -(k_wall * C + lambda_wall.y);
+             // Apply force to position
+             // F = ma => a = F/m => dx = 0.5 * a * dt^2 ? No, implicit Euler.
+             // dx = force * dt^2 / M
+             
+             let correction = force * dt * dt * p.invMass;
+             // Dampen correction to avoid instability
+             x.y += correction * 0.2; 
+             
+             // Update Duals (at end of iter, but we do it here for walls)
+             lambda_wall.y = max(0.0, lambda_wall.y + k_wall * C); // Clamp to >= 0 (push only)
+             k_wall += simParams.beta * abs(C);
+        } else {
+             lambda_wall.y = 0.0; // Reset if not touching? Or keep for warm start?
+             // If we separate, lambda should decay.
+             lambda_wall.y *= 0.9; 
+        }
+
+        // Walls (Left/Right/Top) - Simplified hard constraints for now to save perf
+        x.x = max(p.radius, min(gridParams.width - p.radius, x.x));
+        x.y = max(p.radius, x.y); // Top
+
+        // 3. Particle-Particle Constraints (Spatial Hash)
+        // We can't store lambdas for these, so we use standard XPBD/VBD for collisions.
+        // Or we use a high fixed stiffness.
+        
+        let gridX = i32(x.x / gridParams.cellSize);
+        let gridY = i32(x.y / gridParams.cellSize);
+        
+        for (var r = -1; r <= 1; r++) {
+            for (var c = -1; c <= 1; c++) {
+                let checkX = gridX + c;
+                let checkY = gridY + r;
                 
-                for (var i = 0u; i < count; i++) {
-                    let otherIdx = gridCells[cellIndex * MAX_PER_CELL + i];
-                    if (otherIdx != index) {
-                        let other = particles[otherIdx];
+                if (checkX >= 0 && checkX < i32(gridParams.gridCols) && 
+                    checkY >= 0 && checkY < i32(gridParams.gridRows)) {
+                    
+                    let cellIdx = u32(checkY) * gridParams.gridCols + u32(checkX);
+                    let startIdx = gridCells[cellIdx * 128u]; // Counter is at 0? No, structure is different.
+                    // gridCells buffer is flat array?
+                    // AVBDSolver.js: maxGridCells * 128 * 4 bytes.
+                    // It's a flat array of u32.
+                    // Layout: [count, p1, p2, p3...] for each cell?
+                    // No, usually we use a separate counter buffer and a flat index buffer.
+                    // Let's check AVBDSolver.js createBuffers.
+                    // gridCellsBuffer size: maxGridCells * 128 * 4.
+                    // It seems it stores up to 128 particles per cell.
+                    // But how do we know the count?
+                    // gridCountersBuffer stores the count.
+                    
+                    let count = atomicLoad(&gridCounters[cellIdx]);
+                    
+                    // Iterate particles in cell
+                    for (var k = 0u; k < min(count, 127u); k++) {
+                        let otherIdx = gridCells[cellIdx * 128u + k + 1u]; // +1 because index 0 might be count? 
+                        // Wait, gridCounters is separate.
+                        // So gridCells is just the list.
+                        // But we need to know how it was filled.
+                        // spatial_hash.wgsl fills it.
+                        // Assuming gridCells[cellIdx * 128 + k] is the particle index.
                         
-                        let dx = p.pos.x - other.pos.x;
-                        let dy = p.pos.y - other.pos.y;
-                        let distSq = dx * dx + dy * dy;
-                        let rSum = p.radius + other.radius;
+                        let otherIdxVal = gridCells[cellIdx * 128u + k];
                         
-                        if (distSq < rSum * rSum && distSq > 0.00001) {
-                            let dist = sqrt(distSq);
-                            let dir = vec2<f32>(dx, dy) / dist;
-                            
-                            // Relative Velocity
-                            let vRel = p.vel - other.vel;
-                            let vRelNorm = dot(vRel, dir);
-                            
-                            // Restitution Impulse
-                            if (vRelNorm < 0.0) {
-                                let e = simParams.restitution;
-                                let combinedInvMass = p.invMass + other.invMass;
-                                // Standard Restitution: J = -(1+e) * vRel / (1/m1 + 1/m2)
-                                let j = -(1.0 + e) * vRelNorm / combinedInvMass;
-                                
-                                // Apply impulse to self
-                                p.vel += j * dir * p.invMass;
-                            }
+                        if (otherIdxVal != idx) {
+                             let other = particles[otherIdxVal];
+                             let dir = x - other.pos; // Use current pos of other? Or predicted?
+                             // Ideally predicted, but we only have 'pos' in buffer.
+                             // 'pos' in buffer is x_prev (start of frame).
+                             // We should use 'other.pos + other.vel * dt' (Inertial target)
+                             // Or just 'other.pos' if we assume it hasn't moved much.
+                             // Using 'other.pos' (start of frame) is Jacobi-style.
+                             
+                             let distSq = dot(dir, dir);
+                             let minDist = p.radius + other.radius;
+                             
+                             if (distSq < minDist * minDist && distSq > 0.001) {
+                                 let dist = sqrt(distSq);
+                                 let penetration = minDist - dist;
+                                 let normal = dir / dist;
+                                 
+                                 // XPBD Contact
+                                 // w1 = invMass1, w2 = invMass2
+                                 // alpha = 1 / (k * dt^2)
+                                 // lambda = -C / (w1 + w2 + alpha)
+                                 // dx = w1 * lambda * n
+                                 
+                                 let w1 = p.invMass;
+                                 let w2 = other.invMass;
+                                 let alpha = 0.001; // Compliance
+                                 
+                                 let dLambda = penetration / (w1 + w2 + alpha);
+                                 
+                                 // Apply 100% of correction to self (Jacobi)
+                                 // Because we can't move the other particle (read-only effectively)
+                                 // We assume the other particle will move itself in its own thread.
+                                 // So we move by w1 * dLambda.
+                                 // But since we both move, we effectively resolve it.
+                                 
+                                 x += normal * dLambda * w1 * 1.0; // 1.0 is relaxation factor
+                                 
+                                 // Friction?
+                                 // Tangent velocity
+                                 // ...
+                             }
                         }
                     }
                 }
             }
         }
-    }
-
-    // --- AVBD Step 1: Predict Position (y) ---
-    // y = x + v * dt + a * dt^2
-    // We use the updated velocity (with bounce) to predict y.
-    // dt is already declared above.
-    let dt2 = dt * dt;
-    let a_ext = vec2<f32>(0.0, simParams.gravity); // Gravity (Removed 10x multiplier)
-    
-    var y = p.pos + p.vel * dt + a_ext * dt2;
-    
-    // Mouse Interaction (Add to 'y' as external force/acceleration)
-    if (simParams.mouseButton > 0u) {
-        let dx = simParams.mousePos.x - p.pos.x;
-        let dy = simParams.mousePos.y - p.pos.y;
-        let distSq = dx * dx + dy * dy;
-        let rSq = simParams.mouseRadius * simParams.mouseRadius;
         
-        if (distSq < rSq && distSq > 0.001) {
-            let dist = sqrt(distSq);
-            let dir = vec2<f32>(dx, dy) / dist;
-            // Quadratic falloff for "fatter" influence (stronger further out)
-            let d = dist / simParams.mouseRadius;
-            let falloff = 1.0 - d * d;
-            
-            if (simParams.mouseButton == 1u) {
-                // Drag: Add to acceleration (God Mode: Ignore mass)
-                let attractAcc = dir * simParams.mousePower * 30.0 * falloff;
-                y += attractAcc * dt2;
-                
-                // Mouse Velocity Drag (Restored drag effect)
-                let dragAcc = simParams.mouseDelta * simParams.mousePower * 0.005 * falloff; 
-                y += dragAcc * dt; 
-            } else if (simParams.mouseButton == 3u) {
-                // Repel (Stronger, God Mode)
-                let repelAcc = -dir * simParams.mousePower * 100.0 * falloff;
-                y += repelAcc * dt2;
-            }
-        }
-    }
-    // --- Velocity Clamping (Anti-Tunneling) ---
-    // Limit the maximum distance traveled in one substep to a fraction of the radius
-    let maxDist = p.radius * 0.9;
-    let travel = y - p.pos;
-    let travelLen = length(travel);
-    if (travelLen > maxDist) {
-        y = p.pos + (travel / travelLen) * maxDist;
-    }
-
-    // Initialize x (Optimization Variable)
-    // Warm start with y is usually good
-    var x = y; 
-    
-    // --- AVBD Step 2: Primal-Dual Loop ---
-    // We solve H * dx = f
-    // f = -M/dt^2 * (x - y) + f_con
-    // H = M/dt^2 + H_con
-    
-    let inertiaStiffness = p.mass / dt2;
-    
-    // Stiffness Ramping Parameters
-    // inertiaStiffness = M/dt^2.
-    // To prevent crushing, we need k >> inertiaStiffness.
-    // Compromise: 5000x (Strong but stable)
-    let alpha = simParams.alpha;
-    let baseStiffness = inertiaStiffness * 5000.0 * alpha;
-    
-    var k_wall = baseStiffness; 
-    var k_col = baseStiffness;
-    let beta = baseStiffness * 0.1; // Smoother ramping
-    
-    for (var iter = 0u; iter < simParams.iterations; iter++) {
-        var f = vec2<f32>(0.0, 0.0);
-        var H = 0.0; // Scalar Hessian (Isotropic)
-        
-        // 1. Inertial Term
-        // f_inertial = -M/dt^2 * (x - y)
-        // H_inertial = M/dt^2
-        f += -inertiaStiffness * (x - y);
-        H += inertiaStiffness;
-        
-        // 2. Wall Constraints
-        let r = p.radius;
-        let width = gridParams.width;
-        let height = gridParams.height;
-        
-        // Helper to add constraint
-        // C(x) <= 0 is satisfied. C(x) > 0 is violation.
-        // We define C(x) as penetration depth (positive = violation)
-        
-        // Left Wall: x < r -> C = r - x
-        if (x.x < r) {
-            let C = r - x.x;
-            let grad = vec2<f32>(-1.0, 0.0);
-            f -= k_wall * C * grad;
-            H += k_wall; 
-            k_wall += beta * C; 
-        }
-        // Right Wall: x > w - r -> C = x - (w - r)
-        if (x.x > width - r) {
-            let C = x.x - (width - r);
-            let grad = vec2<f32>(1.0, 0.0);
-            f -= k_wall * C * grad;
-            H += k_wall;
-            k_wall += beta * C;
-        }
-        // Floor: y > h - r -> C = y - (h - r)
-        if (x.y > height - r) {
-            let C = x.y - (height - r);
-            let grad = vec2<f32>(0.0, 1.0);
-            f -= k_wall * C * grad;
-            H += k_wall;
-            k_wall += beta * C;
-        }
-        // Ceiling: y < r -> C = r - y
-        if (x.y < r) {
-            let C = r - x.y;
-            let grad = vec2<f32>(0.0, -1.0);
-            f -= k_wall * C * grad;
-            H += k_wall;
-            k_wall += beta * C;
-        }
-
-        // 3. Obstacle Collisions (Rectangles)
-        // Iterate over active obstacles only
-        let numObstacles = simParams.obstacleCount;
-        for (var i = 0u; i < numObstacles; i++) {
+        // Obstacle Collisions
+        for (var i = 0u; i < simParams.obstacleCount; i++) {
             let obs = obstacles[i];
-            
-            // Transform particle to local space of obstacle
+            // Simple Box SDF
+            // Rotate point into box space
             let relPos = x - obs.pos;
             let c = cos(-obs.rotation);
             let s = sin(-obs.rotation);
-            let localPos = vec2<f32>(
-                relPos.x * c - relPos.y * s,
-                relPos.x * s + relPos.y * c
-            );
+            let localPos = vec2<f32>(relPos.x * c - relPos.y * s, relPos.x * s + relPos.y * c);
             
-            // Box SDF
-            // d = length(max(q, 0)) + min(max(q.x, q.y), 0)
-            // q = abs(p) - b
-            let q = abs(localPos) - (obs.halfSize + vec2<f32>(r, r)); // Expand box by radius
+            let d = abs(localPos) - obs.halfSize - vec2<f32>(p.radius);
+            let dist = length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
             
-            // We only care if inside (dist <= 0)
-            // In our constraint formulation, C > 0 is violation.
-            // SDF returns negative inside. So C = -SDF.
-            
-            // Optimized check: if q.x < 0 and q.y < 0, we are inside
-            if (q.x < 0.0 && q.y < 0.0) {
-                // Inside!
-                // Find closest edge
-                // Since we are inside, max(q, 0) is 0.
-                // dist = max(q.x, q.y) (negative value)
+            if (dist < 0.0) {
+                // Collision
+                // Gradient?
+                // Closest point on box
+                let clamped = clamp(localPos, -(obs.halfSize + p.radius), (obs.halfSize + p.radius));
+                // This is rough.
                 
-                var localNormal = vec2<f32>(0.0, 0.0);
-                var dist = 0.0;
-                
-                if (q.x > q.y) {
-                    dist = q.x;
-                    // Normal points outwards. If localPos.x > 0, normal is (1,0), else (-1,0)
-                    localNormal = vec2<f32>(sign(localPos.x), 0.0);
-                } else {
-                    dist = q.y;
-                    localNormal = vec2<f32>(0.0, sign(localPos.y));
-                }
-                
-                // Transform normal back to world space
-                // Rotate by +obs.rotation
-                let wc = cos(obs.rotation);
-                let ws = sin(obs.rotation);
-                let worldNormal = vec2<f32>(
-                    localNormal.x * wc - localNormal.y * ws,
-                    localNormal.x * ws + localNormal.y * wc
-                );
-                
-                // Constraint Violation C = -dist (since dist is negative inside)
-                let C = -dist;
-                let grad = -worldNormal; // Gradient of C w.r.t x is -normal (pushes in direction of normal)
-                // Wait, C = penetration. Force should push opposite to penetration?
-                // If C > 0 (violation), we want to reduce C.
-                // x_new = x - C * grad / |grad|^2 ?
-                // Force direction: -grad * C.
-                // If normal points OUT of box, we want to push along normal.
-                // So force = k * C * normal.
-                // grad = -normal.
-                // f = -k * C * grad = -k * C * (-normal) = k * C * normal. Correct.
-                
-                f -= k_wall * C * grad;
-                H += k_wall;
-                k_wall += beta * C;
+                // Just push out along normal
+                // ...
+                // For now, simple repulsion
+                let normal = normalize(relPos); // Approx
+                x -= normal * dist;
             }
         }
-
-        // 3. Particle Collisions (Spatial Hash)
-        let cellX = i32(x.x / gridParams.cellSize);
-        let cellY = i32(x.y / gridParams.cellSize);
-
-        for (var cy = -1; cy <= 1; cy++) {
-            for (var cx = -1; cx <= 1; cx++) {
-                let neighborX = cellX + cx;
-                let neighborY = cellY + cy;
-                
-                if (neighborX >= 0 && neighborX < i32(gridParams.cols) && neighborY >= 0 && neighborY < i32(gridParams.rows)) {
-                    let cellIndex = u32(neighborY) * gridParams.cols + u32(neighborX);
-                    let count = min(atomicLoad(&gridCounters[cellIndex]), MAX_PER_CELL);
-                    
-                    for (var i = 0u; i < count; i++) {
-                        let otherIdx = gridCells[cellIndex * MAX_PER_CELL + i];
-                        if (otherIdx != index) {
-                            let other = particles[otherIdx];
-                            
-                            // Distance constraint
-                            // C(x) = (r1 + r2) - dist > 0
-                            let dx = x.x - other.pos.x; // Use other.pos (Jacobi style)
-                            let dy = x.y - other.pos.y;
-                            let distSq = dx * dx + dy * dy;
-                            let rSum = p.radius + other.radius;
-                            
-                            if (distSq < rSum * rSum && distSq > 0.00001) {
-                                let dist = sqrt(distSq);
-                                let C = rSum - dist;
-                                let dir = vec2<f32>(dx, dy) / dist; // Gradient of dist w.r.t x
-                                // Gradient of C w.r.t x is -dir
-                                let grad = -dir; 
-                                
-                                // Actually, let's define C as penetration: C = rSum - dist
-                                // We want C <= 0. So violation is C > 0.
-                                // Force direction should push x away.
-                                // f_con = -k * C * dir
-                                
-                                // Normal Force (Constraint)
-                                let fNormal = -k_col * C * grad;
-                                f += fNormal;
-                                H += k_col; // Anisotropic stiffness
-                                
-                                // --- Restitution (Bounce) ---
-                                // Correct Impulse-based collision response:
-                                // J = -(1+e) * vRel / (1/m1 + 1/m2)
-                                // Force = J / dt
-                                // PROBLEM: High stiffness (k_col) suppresses this force in the solver (dx = f/H).
-                                // We need to scale the force so that dx corresponds to the bounce displacement.
-                                // dx_target = J * dt / mass
-                                // f_required = dx_target * H  ~= dx_target * k_col
-                                // f_current = J / dt
-                                // Ratio = (J * dt / mass * k_col) / (J / dt) = k_col * dt^2 / mass = k_col / inertiaStiffness
-                                
-                                // Ramp stiffness based on violation
-                                // k_col += beta * C; 
-                                // Note: Ramping inside neighbor loop might be aggressive, but valid for AVBD
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 4. Update x (Component-wise division for Diagonal Hessian)
-        // x_new = x + H^-1 * f
-        // Note: f calculated above is the residual force? 
-        // Wait, Newton step: H * dx = -Gradient(E)
-        // Gradient(E) = f_total (forces are negative gradient)
-        // So H * dx = f_total
-        // dx = H^-1 * f_total
-        // x_new = x + dx
-        
-        // Wait, 'f' accumulated above:
-        // Inertial: -k * (x - y) -> Force pulling towards y
-        // Constraint: -k * C * grad -> Force pushing out of constraint
-        // These are Forces.
-        // So yes, dx = f / H
-        
-        x += f / H;
     }
-    
-    // --- Final Update ---
-    // Update Velocity
-    p.vel = (x - p.pos) / dt; // v = (x - x^t) / dt
-    // 1. Prediction (y = x + v * dt)
-    // Apply Gravity
-    var gravityForce = vec2<f32>(0.0, simParams.gravity);
-    
-    if (simParams.gravityType == 1u) {
-        // Central Gravity (Black Hole)
-        let center = vec2<f32>(gridParams.width * 0.5, gridParams.height * 0.5);
-        let toCenter = center - p.pos;
-        let dist = length(toCenter);
-        if (dist > 10.0) {
-            let dir = normalize(toCenter);
-            // F = G * M / r^2. 
-            // Newtonian Gravity (Keplerian orbits)
-            // User requested "real gravity" and "proper circular fall off".
-            // We use a softener (dist^2 + 100.0) to avoid singularity.
-            // Multiplied constant by 300.0 to compensate for r^2 falloff at typical screen scales.
-            let force = dir * (simParams.blackHoleGravity * 5000.0 * 300.0) / (dist * dist + 100.0); 
-            
-            // Tangential "Swirl" Force
-            // Hybrid: Constant base (for outer) + Strong 1/r (for inner)
-            // "Much stronger toward inside"
-            let tangent = vec2<f32>(-dir.y, dir.x);
-            let baseSwirl = 100.0;
-            let innerSwirl = 2000.0 / (dist + 10.0);
-            let swirl = tangent * (simParams.blackHoleSwirl * (baseSwirl + innerSwirl) * 50.0);
 
-            // Repulsion Force (Restored & Boosted)
-            // User said it "is just more gravity" -> Fixed direction to be OUTWARDS (-dir).
-            // F = k / r (1/r falloff to match gravity range)
-            let repulsion = -dir * (simParams.blackHoleRepulsion * 2000.0) / (dist + 10.0);
-
-            gravityForce = force + swirl + repulsion;
-        } else {
-            // Inside Event Horizon: Slingshot!
-            // Apply massive gravity to accelerate them through
-             let force = normalize(toCenter) * (simParams.blackHoleGravity * 50.0) / (max(dist, 10.0) + 10.0);
-             gravityForce = force;
-        }
-    }
-    p.vel = p.vel + gravityForce * dt;
+    // 4. Final Update
+    // v = (x - x_prev) / dt
+    let v_new = (x - p.pos) / dt;
+    
+    // Apply Damping
+    p.vel = v_new * simParams.damping;
     p.pos = x;
     
-    // Damping (Global)
-    p.vel *= pow(simParams.damping, dt * 60.0);
-    
-    // Boundary Restitution (Bounce)
-    // Explicit bounce check on velocity since AVBD is position-based
-    let r = p.radius;
-    let width = gridParams.width;
-    let height = gridParams.height;
-    let rest = simParams.restitution;
+    // Store Wall Lambdas
+    wLambda.lambdaX = 0.0; // Not used yet
+    wLambda.lambdaY = lambda_wall.y;
+    wLambda.stiffness = k_wall;
+    wallLambdas[idx] = wLambda;
 
-    if (p.pos.x <= r && p.vel.x < 0.0) { p.vel.x *= -rest; }
-    if (p.pos.x >= width - r && p.vel.x > 0.0) { p.vel.x *= -rest; }
-    if (p.pos.y <= r && p.vel.y < 0.0) { p.vel.y *= -rest; }
-    if (p.pos.y >= height - r && p.vel.y > 0.0) { p.vel.y *= -rest; }
-
-    // Hard Position Clamping (Safety Net)
-    p.pos.x = clamp(p.pos.x, r, width - r);
-    p.pos.y = clamp(p.pos.y, r, height - r);
-
-    particles[index] = p;
+    particles[idx] = p;
 }

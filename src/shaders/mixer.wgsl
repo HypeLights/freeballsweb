@@ -107,6 +107,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 force.y = (dy / dist) * power;
             }
         }
+        case 5u: { // Smash (Center Pull)
+            let dx = cx - x;
+            let dy = cy - y;
+            let dist = sqrt(dx*dx + dy*dy);
+            
+            if (dist > 10.0) {
+                // Strong pull to center
+                force.x = (dx / dist) * power * 5.0;
+                force.y = (dy / dist) * power * 5.0;
+            }
+        }
         default: {}
     }
 

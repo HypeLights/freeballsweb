@@ -1,12 +1,9 @@
-import { WebGPUContext } from './src/gpu/WebGPUContext.js';
-import { AVBDSolver } from './src/gpu/AVBDSolver.js';
 import { Overlay } from './src/ui/Overlay.js';
+import { SolverProxy } from './src/worker/SolverProxy.js';
 
-const gpu = new WebGPUContext();
-let solver = null;
+let worker = null;
+let solverProxy = null;
 let overlay = null;
-let isRunning = false;
-let lastTime = 0;
 
 // Mouse State
 const mouse = {
@@ -23,48 +20,59 @@ const mouse = {
 };
 
 async function init() {
-    // We don't have a status element anymore in the same way, 
-    // but Overlay might create one or we can just log.
-    console.log('Initializing...');
+    console.log('Initializing Main Thread...');
 
-    try {
-        await gpu.init('simCanvas');
-        console.log('WebGPU Initialized');
-
-        solver = new AVBDSolver(gpu);
-        await solver.init();
-
-        // Initialize UI Overlay
-        overlay = new Overlay(solver, mouse);
-
-        console.log('Simulation Running');
-
-        // Input Handling
-        setupInput();
-
-        // Resize handling
-        window.addEventListener('resize', () => {
-            gpu.resize();
-            solver.updateParams();
-        });
-        gpu.resize();
-
-        // Start loop
-        isRunning = true;
-        requestAnimationFrame(loop);
-
-    } catch (error) {
-        console.error(error);
-        document.body.innerHTML += `<div style="color:red; padding:20px">Error: ${error.message}</div>`;
-    }
-}
-
-function setupInput() {
     const canvas = document.getElementById('simCanvas');
 
+    // Create Worker
+    worker = new Worker('./src/worker/simulationWorker.js', { type: 'module' });
+
+    // Create Solver Proxy
+    solverProxy = new SolverProxy(worker);
+    solverProxy.init();
+
+    // Transfer Control to Worker
+    const offscreen = canvas.transferControlToOffscreen();
+
+    worker.postMessage({
+        type: 'INIT',
+        payload: {
+            canvas: offscreen,
+            width: window.innerWidth,
+            height: window.innerHeight
+        }
+    }, [offscreen]);
+
+    // Initialize UI Overlay
+    overlay = new Overlay(solverProxy, mouse);
+
+    console.log('UI Initialized');
+
+    // Input Handling
+    setupInput(canvas);
+
+    // Resize handling
+    window.addEventListener('resize', () => {
+        worker.postMessage({
+            type: 'RESIZE',
+            payload: {
+                width: window.innerWidth,
+                height: window.innerHeight
+            }
+        });
+    });
+
+    // Listen for stats from worker
+    worker.onmessage = (e) => {
+        const { type, payload } = e.data;
+        if (type === 'STATS') {
+            if (solverProxy) solverProxy.updateStats(payload);
+        }
+    };
+}
+
+function setupInput(canvas) {
     // Mouse Events
-    // Mouse Events
-    // Move move/up to window to handle drags outside canvas/over UI
     window.addEventListener('mousemove', (e) => {
         mouse.prevX = mouse.x;
         mouse.prevY = mouse.y;
@@ -72,21 +80,42 @@ function setupInput() {
         mouse.y = e.clientY;
         mouse.dx = mouse.x - mouse.prevX;
         mouse.dy = mouse.y - mouse.prevY;
+
         updateMouseVisual();
+
+        // Send to Worker
+        worker.postMessage({
+            type: 'UPDATE_MOUSE',
+            payload: mouse
+        });
     });
 
+    // Note: mousedown/up on canvas might not fire if canvas is offscreen? 
+    // Actually, DOM events still fire on the canvas ELEMENT even if context is offscreen.
     canvas.addEventListener('mousedown', (e) => {
         mouse.isDown = true;
         mouse.button = e.button;
         e.preventDefault();
+        worker.postMessage({ type: 'UPDATE_MOUSE', payload: mouse });
     });
 
-    window.addEventListener('mouseup', () => mouse.isDown = false);
+    window.addEventListener('mouseup', () => {
+        mouse.isDown = false;
+        worker.postMessage({ type: 'UPDATE_MOUSE', payload: mouse });
+    });
 
     // Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
         if (e.key.toLowerCase() === 'r') {
-            if (solver) solver.initParticles(overlay ? overlay.currentScene : 'grid');
+            if (solverProxy) solverProxy.initParticles(overlay ? overlay.currentScene : 'grid');
+        }
+        if (e.code === 'Space') {
+            if (solverProxy) {
+                solverProxy.paused = !solverProxy.paused;
+                // Update UI checkbox if exists
+                const chk = document.getElementById('chk-pause-overlay');
+                if (chk) chk.checked = !solverProxy.paused; // Logic might be inverted in UI?
+            }
         }
     });
 
@@ -103,8 +132,8 @@ function setupInput() {
         mouse.radius = Math.max(50, Math.min(600, mouse.radius + delta));
 
         // Sync with Solver and UI
-        if (solver) {
-            solver.mouseRadius = mouse.radius;
+        if (solverProxy) {
+            solverProxy.mouseRadius = mouse.radius;
 
             // Update UI Slider
             const slider = document.getElementById('inp-mouse-radius');
@@ -158,19 +187,6 @@ function updateMouseVisual() {
     }
 }
 
-function loop(timestamp) {
-    if (!isRunning) return;
-
-    const dt = (timestamp - lastTime) / 1000;
-    lastTime = timestamp;
-
-    // Physics & Render
-    if (solver) {
-        solver.update(Math.min(dt, 0.1), mouse);
-    }
-
-    requestAnimationFrame(loop);
-}
-
 // Start
 init();
+

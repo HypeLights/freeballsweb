@@ -7,7 +7,7 @@ export class WebGPUContext {
         this.presentationFormat = null;
     }
 
-    async init(canvasId) {
+    async init(canvas) {
         if (!navigator.gpu) {
             throw new Error('WebGPU not supported on this browser.');
         }
@@ -20,9 +20,18 @@ export class WebGPUContext {
             throw new Error('No appropriate GPU adapter found.');
         }
 
-        this.device = await this.adapter.requestDevice();
-        
-        this.canvas = document.getElementById(canvasId);
+        const requiredLimits = {};
+        // Request 2GB or adapter max for storage buffers
+        const maxStorage = this.adapter.limits.maxStorageBufferBindingSize;
+        if (maxStorage > 134217728) { // If > 128MB
+            requiredLimits.maxStorageBufferBindingSize = maxStorage;
+        }
+
+        this.device = await this.adapter.requestDevice({
+            requiredLimits
+        });
+
+        this.canvas = canvas;
         this.context = this.canvas.getContext('webgpu');
         this.presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 
@@ -36,15 +45,12 @@ export class WebGPUContext {
         return true;
     }
 
-    resize() {
+    resize(width, height) {
         if (!this.canvas || !this.device) return;
-        
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        
+
         this.canvas.width = width;
         this.canvas.height = height;
-        
+
         this.context.configure({
             device: this.device,
             format: this.presentationFormat,

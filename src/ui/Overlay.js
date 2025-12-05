@@ -449,16 +449,28 @@ export class Overlay {
                     <input type="range" id="inp-gravity" min="0" max="20" step="0.1" value="4" />
                 </div>
                 <div class="control-row">
+                    <label>Damping <span id="val-damping">0.999</span></label>
+                    <input type="range" id="inp-damping" min="0.900" max="1.000" step="0.001" value="0.999" />
+                </div>
+                <div class="control-row">
                     <label>Restitution <span id="val-restitution">0.8</span></label>
                     <input type="range" id="inp-restitution" min="0" max="1.5" step="0.05" value="0.8" />
                 </div>
                 <div class="control-row">
-                    <label>Damping <span id="val-damping">0.999</span></label>
-                    <input type="range" id="inp-damping" min="0.9" max="1.0" step="0.001" value="0.999" />
+                    <label>Regularization (Alpha) <span id="val-alpha">0.95</span></label>
+                    <input type="range" id="inp-alpha" min="0.0" max="1.0" step="0.01" value="0.95" />
                 </div>
                 <div class="control-row">
-                    <label>Substeps <span id="val-substeps">32</span></label>
-                    <input type="range" id="inp-substeps" min="1" max="64" step="1" value="32" />
+                    <label>Stiffness Ramping (Beta) <span id="val-beta">10.0</span></label>
+                    <input type="range" id="inp-beta" min="0.0" max="100.0" step="0.1" value="10.0" />
+                </div>
+                <div class="control-row">
+                    <label>Substeps <span id="val-substeps">4</span></label>
+                    <input type="range" id="inp-substeps" min="1" max="20" step="1" value="4" />
+                </div>
+                <div class="control-row">
+                    <label>Iterations <span id="val-iterations">4</span></label>
+                    <input type="range" id="inp-iterations" min="1" max="20" step="1" value="4" />
                 </div>
             </div>
 
@@ -466,7 +478,7 @@ export class Overlay {
                 <h3>Particles</h3>
                 <div class="control-row">
                     <label>Max Balls <span id="val-count">4000</span></label>
-                    <input type="range" id="inp-count" min="100" max="100000" step="100" value="4000" />
+                    <input type="range" id="inp-count" min="100" max="1000000" step="100" value="4000" />
                 </div>
                 <div class="control-row">
                     <label>Ball Radius <span id="val-ball-radius">10</span></label>
@@ -510,7 +522,10 @@ export class Overlay {
                 </div>
 
             </div>
-            <button id="btn-reset" class="action-btn">Reset Simulation</button>
+            <div style="display: flex; gap: 10px;">
+                <button id="btn-reset" class="action-btn" style="flex: 1;">Reset Sim</button>
+                <button id="btn-reset-params" class="action-btn" style="flex: 1;">Reset Params</button>
+            </div>
         `;
         this.container.appendChild(panel);
 
@@ -562,6 +577,9 @@ export class Overlay {
         this.bindSlider('inp-restitution', 'val-restitution', v => this.solver.restitution = parseFloat(v));
         this.bindSlider('inp-damping', 'val-damping', v => this.solver.damping = parseFloat(v));
         this.bindSlider('inp-substeps', 'val-substeps', v => this.solver.substeps = parseInt(v));
+        this.bindSlider('inp-iterations', 'val-iterations', v => this.solver.iterations = parseInt(v));
+        this.bindSlider('inp-alpha', 'val-alpha', v => this.solver.alpha = parseFloat(v));
+        this.bindSlider('inp-beta', 'val-beta', v => this.solver.beta = parseFloat(v));
 
         // Interaction Bindings
         this.bindSlider('inp-mouse-power', 'val-mouse-power', v => this.solver.mousePower = parseFloat(v));
@@ -590,7 +608,7 @@ export class Overlay {
 
             // Update Slider Max
             const countSlider = document.getElementById('inp-count');
-            countSlider.max = Math.min(300000, maxSafeCount); // Cap at 300k
+            countSlider.max = Math.min(1000000, maxSafeCount); // Cap at 1M
 
             // Clamp current value if needed
             if (parseInt(countSlider.value) > countSlider.max) {
@@ -601,7 +619,6 @@ export class Overlay {
 
             // Real-time update for ALL scenes (as requested)
             this.solver.ballRadius = r;
-            this.solver.cellSize = Math.max(20, r * 2.5);
             // No reset called. Solver.update handles the radius change.
         });
         this.bindSlider('inp-rate', 'val-rate', v => this.solver.spawnRate = parseFloat(v));
@@ -609,11 +626,9 @@ export class Overlay {
         // Interaction Bindings (Mouse)
         this.bindSlider('inp-mouse-power', 'val-mouse-power', v => {
             this.solver.mousePower = parseFloat(v);
-            this.solver.updateParams();
         });
         this.bindSlider('inp-mouse-radius', 'val-mouse-radius', v => {
             this.solver.mouseRadius = parseFloat(v);
-            this.solver.updateParams();
         });
 
         // Render Bindings
@@ -621,33 +636,36 @@ export class Overlay {
         if (chkBloom) {
             chkBloom.addEventListener('change', (e) => {
                 this.solver.bloomEnabled = e.target.checked;
-                this.solver.updateParams();
             });
         }
         const chkAA = document.getElementById('chk-aa');
         if (chkAA) {
             chkAA.addEventListener('change', (e) => {
                 this.solver.aaEnabled = e.target.checked;
-                this.solver.updateParams();
             });
         }
         this.bindSlider('inp-bloom-strength', 'val-bloom-strength', v => {
             this.solver.bloomStrength = parseFloat(v);
-            this.solver.updateParams();
         });
         this.bindSlider('inp-bloom-radius', 'val-bloom-radius', v => {
             this.solver.bloomRadius = parseFloat(v);
-            this.solver.updateParams();
         });
         this.bindSlider('inp-bloom-thresh', 'val-bloom-thresh', v => {
             this.solver.bloomThreshold = parseFloat(v);
-            this.solver.updateParams();
         });
 
         const btnReset = document.getElementById('btn-reset');
         if (btnReset) {
             btnReset.addEventListener('click', () => {
                 this.solver.initParticles(this.currentScene);
+            });
+        }
+
+        const btnResetParams = document.getElementById('btn-reset-params');
+        if (btnResetParams) {
+            btnResetParams.addEventListener('click', () => {
+                this.solver.resetParams();
+                this.updateAllSliders();
             });
         }
 
@@ -733,9 +751,9 @@ export class Overlay {
         modal.innerHTML = `
             <div class="modal-content">
                 <button class="modal-close-btn">&times;</button>
-                <div class="modal-title" style="margin-top: 10px;">About FreeBalls<span style="color: #4facfe;">GPU</span> <span style="font-size: 0.6em; opacity: 0.7;">v1.0</span></div>
+                <div class="modal-title" style="margin-top: 10px;">About FreeBalls<span style="color: #4facfe;">Web</span> <span style="font-size: 0.6em; opacity: 0.7;">v1.0</span></div>
                 <div class="modal-body" style="line-height: 1.6; color: rgba(255,255,255,0.9);">
-                    <p style="font-size: 18px; margin-bottom: 20px;"><strong>FreeBallsGPU</strong> is a physics playground that pushes the limits of your browser.</p>
+                    <p style="font-size: 18px; margin-bottom: 20px;"><strong>FreeBalls Web</strong> is a physics playground that pushes the limits of your browser.</p>
                     
                     <p>By leveraging <strong>WebGPU</strong> and the <strong>AVBD</strong> (Augmented Vertex Block Descent) algorithm, this app simulates up to hundreds of thousands of interacting particles entirely on the GPU.</p>
 
@@ -828,7 +846,7 @@ export class Overlay {
                 selected.innerHTML = `<span class="gradient-preview" style="background: ${scheme.color}"></span> ${scheme.name}`;
                 items.classList.add('select-hide');
                 selected.classList.remove('select-arrow-active');
-                this.solver.setColorScheme(scheme.value);
+                this.solver.colorScheme = scheme.value;
 
                 // Update Logo
                 const gpuText = logo ? logo.querySelector('.gpu-text') : null;
@@ -936,6 +954,11 @@ export class Overlay {
         const substepsInput = document.getElementById('inp-substeps');
         const substepsVal = document.getElementById('val-substeps');
         if (substepsInput && substepsVal) {
+            if (this.currentScene === 'wave') {
+                substepsInput.max = 64;
+            } else {
+                substepsInput.max = 20;
+            }
             substepsInput.value = this.solver.substeps;
             substepsVal.textContent = this.solver.substeps;
         }
@@ -1188,7 +1211,7 @@ export class Overlay {
 
                     // Update max balls to accommodate new density
                     if (requiredParticles > this.solver.particleCount) {
-                        this.solver.particleCount = Math.min(requiredParticles, 100000); // Cap at 100K
+                        this.solver.particleCount = Math.min(requiredParticles, 1000000); // Cap at 1M
                         // Update the max balls slider if it exists
                         const maxBallsSlider = document.getElementById('inp-max-balls');
                         const maxBallsValue = document.getElementById('val-max-balls');
@@ -1287,6 +1310,7 @@ export class Overlay {
                 mixerButton.addEventListener('mousedown', () => {
                     if (this.solver.currentSceneObject) {
                         this.solver.currentSceneObject.mixerEnabled = true;
+                        this.solver.currentSceneObject.mixerSmash = true; // Enable Smash Mode
                         setButtonActive(true);
                     }
                 });
@@ -1294,6 +1318,7 @@ export class Overlay {
                 mixerButton.addEventListener('mouseup', () => {
                     if (this.solver.currentSceneObject) {
                         this.solver.currentSceneObject.mixerEnabled = false;
+                        this.solver.currentSceneObject.mixerSmash = false; // Disable Smash Mode
                         setButtonActive(false);
                     }
                 });
@@ -1310,6 +1335,7 @@ export class Overlay {
                     e.preventDefault();
                     if (this.solver.currentSceneObject) {
                         this.solver.currentSceneObject.mixerEnabled = true;
+                        this.solver.currentSceneObject.mixerSmash = true; // Enable Smash Mode
                         setButtonActive(true);
                     }
                 });
@@ -1318,6 +1344,7 @@ export class Overlay {
                     e.preventDefault();
                     if (this.solver.currentSceneObject) {
                         this.solver.currentSceneObject.mixerEnabled = false;
+                        this.solver.currentSceneObject.mixerSmash = false; // Disable Smash Mode
                         setButtonActive(false);
                     }
                 });
@@ -1512,6 +1539,29 @@ export class Overlay {
         }
     }
 
+    updateAllSliders() {
+        // Update sliders handled by updateActiveScenePanel
+        this.updateActiveScenePanel();
+
+        // Update other sliders
+        const updateSlider = (id, valId, value) => {
+            const el = document.getElementById(id);
+            const valEl = document.getElementById(valId);
+            if (el && valEl) {
+                el.value = value;
+                valEl.textContent = value;
+            }
+        };
+
+        updateSlider('inp-speed', 'val-speed', this.solver.simSpeed);
+        updateSlider('inp-mouse-power', 'val-mouse-power', this.solver.mousePower);
+        updateSlider('inp-mouse-radius', 'val-mouse-radius', this.solver.mouseRadius);
+        updateSlider('inp-bloom-strength', 'val-bloom-strength', this.solver.bloomStrength);
+        updateSlider('inp-bloom-radius', 'val-bloom-radius', this.solver.bloomRadius);
+        updateSlider('inp-bloom-thresh', 'val-bloom-thresh', this.solver.bloomThreshold);
+        updateSlider('inp-count', 'val-count', this.solver.particleCount);
+    }
+
     startStatsLoop() {
         const fpsEl = document.getElementById('stat-fps');
         const countEl = document.getElementById('stat-count');
@@ -1523,7 +1573,7 @@ export class Overlay {
             const now = performance.now();
             frames++;
 
-            if (now >= lastTime + 1) {
+            if (now >= lastTime + 100) {
                 const fps = Math.round((frames * 1000) / (now - lastTime));
                 const ms = (1000 / fps).toFixed(2);
 

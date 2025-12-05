@@ -8,10 +8,10 @@ export class CollisionScene extends Scene {
         this.solver.damping = 1.0;   // No air resistance
         this.solver.restitution = 0.9; // Bouncy
 
-        const cx = window.innerWidth / 2;
-        const cy = window.innerHeight / 2;
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        const cx = this.solver.width / 2;
+        const cy = this.solver.height / 2;
+        const width = this.solver.width;
+        const height = this.solver.height;
 
         const groupSize = Math.floor(this.solver.particleCount / 2);
         const radius = this.solver.ballRadius;
@@ -97,7 +97,8 @@ export class CollisionScene extends Scene {
 
     async initMixerGPU() {
         try {
-            const shaderCode = await (await fetch('./src/shaders/mixer.wgsl')).text();
+            const shaderUrl = new URL('../shaders/mixer.wgsl', import.meta.url).href;
+            const shaderCode = await (await fetch(shaderUrl)).text();
 
             // 1. Create Uniform Buffer
             // Size: 32 bytes (8 floats/uints)
@@ -158,10 +159,15 @@ export class CollisionScene extends Scene {
             case 'corners': modeIdx = 4; break;
         }
 
+        // Override mode if Smash is active (Button Held)
+        if (this.mixerSmash) {
+            modeIdx = 5;
+        }
+
         // Update Params
         const params = new Float32Array([
-            window.innerWidth,      // width
-            window.innerHeight,     // height
+            this.solver.width,      // width
+            this.solver.height,     // height
             this.time,             // time
             this.mixerPower,       // power
         ]);

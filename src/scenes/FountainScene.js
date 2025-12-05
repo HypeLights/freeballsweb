@@ -8,7 +8,7 @@ export class FountainScene extends Scene {
 
         // Add a floor
         const obstacleData = new Float32Array(this.solver.maxObstacles * 8);
-        this.solver.addObstacle(obstacleData, window.innerWidth / 2, window.innerHeight - 10, window.innerWidth / 2, 10, 0);
+        this.solver.addObstacle(obstacleData, this.solver.width / 2, this.solver.height - 10, this.solver.width / 2, 10, 0);
         this.solver.device.queue.writeBuffer(this.solver.obstacleBuffer, 0, obstacleData.slice(0, 8));
 
         // Reset spawn accumulator
@@ -37,8 +37,8 @@ export class FountainScene extends Scene {
                 const updateData = new Float32Array(updateBuffer);
                 const updateDataUint = new Uint32Array(updateBuffer);
 
-                const spawnX = window.innerWidth / 2;
-                const spawnY = window.innerHeight - 50;
+                const spawnX = this.solver.width / 2;
+                const spawnY = this.solver.height - 50;
 
                 for (let i = 0; i < countToEmit; i++) {
                     const offset = i * 10;

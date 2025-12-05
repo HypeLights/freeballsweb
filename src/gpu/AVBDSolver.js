@@ -28,55 +28,65 @@ export class AVBDSolver {
         this.currentSceneObject = this.scenes['grid'];
 
         // Simulation Parameters
-        this.maxParticles = 300000;
+        this.maxParticles = 1000000;
         this.particleCount = 4000; // Updated to match UI default
         this.maxObstacles = 1000; // Increased to allow full screen of buckets
         this.obstacleCount = 0;
-        this.gravity = 4.0; // Scaled in shader
+
         this.gravityType = 0; // 0 = Down, 1 = Center
-        this.blackHoleGravity = 4.0;
-        this.blackHoleSwirl = 1.0;
-        this.blackHoleRadius = 30.0;
-        this.blackHoleRepulsion = 1.0;
-        this.restitution = 0.8;
-        this.damping = 0.999; // Less air resistance for better energy conservation
-        this.alpha = 1.0; // Softness (1.0 = Rigid)
-        this.colorScheme = 'rainbow'; // Default color scheme
+        // Black Hole params are now backed by fields
+        // Physics Parameters
+        this._gravity = 4.0;
+        this._restitution = 0.8;
+        this._damping = 0.999;
+        this._alpha = 0.95; // Regularization (Paper value)
+        this._beta = 10.0;  // Stiffness Ramping (Paper value)
+        this._substeps = 4;
+        this._iterations = 4;
+        this._ballRadius = 10;
+
+        this._blackHoleGravity = 4.0;
+        this._blackHoleRepulsion = 1.0;
+        this._blackHoleSwirl = 1.0;
+        this._blackHoleRadius = 30.0;
+        this._colorScheme = 'rainbow';
         this.spawnRate = 5;
-        this.substeps = 32;
-        this.iterations = 1; // Locked to 1 for performance
-        this.ballRadius = 10; // Increased default radius
 
         // Interaction Parameters
-        this.mousePower = 250;
-        this.mouseRadius = 200;
+        this._mousePower = 250;
+        this._mouseRadius = 200;
 
         // Galton Scene Parameters
-        this.galtonSpawnerDistance = 100;
-        this.galtonPegSize = 3;
-        this.galtonSpawnRate = 5;
+        this._galtonSpawnerDistance = 100;
+        this._galtonPegSize = 3;
+        this._galtonSpawnRate = 5;
+        this._galtonBucketSpacing = 40;
+        this._galtonBucketHeight = 0; // Will be set in resetParams or init
+
 
         // Fireworks Parameters
-        this.fireworksSpawnRate = 1.0;
-        this.fireworksExplosionSize = 100;
-        this.fireworksRocketSpeed = 1.5;
-        this.fireworksExplosionSpeed = 1.0;
+        this._fireworksSpawnRate = 1.0;
+        this._fireworksExplosionSize = 100;
+        this._fireworksRocketSpeed = 1.5;
+        this._fireworksExplosionSpeed = 1.0;
 
         // Planetary Parameters
-        this.planetaryBallVariance = 0.5;
+        this._planetaryBallVariance = 0.5;
 
         // Render Parameters
-        this.bloomEnabled = true;
-        this.aaEnabled = true;
-        this.bloomStrength = 0.2;
-        this.bloomThreshold = 0.9;
-        this.bloomRadius = 0.2;
+        this._bloomEnabled = true;
+        this._aaEnabled = true;
+        this._bloomStrength = 0.2;
+        this._bloomThreshold = 0.9;
+        this._bloomRadius = 0.2;
         this.simSpeed = 1.0;
 
         // Grid Parameters
-        this.cellSize = 20; // Reduced for tiny particles
-        this.gridCols = Math.ceil(window.innerWidth / this.cellSize);
-        this.gridRows = Math.ceil(window.innerHeight / this.cellSize);
+        this.width = 1920; // Default, will be updated by resize
+        this.height = 1080;
+        this.cellSize = 4; // Min Cell Size (Radius 2.0) for worst-case allocation
+        this.gridCols = Math.ceil(this.width / this.cellSize);
+        this.gridRows = Math.ceil(this.height / this.cellSize);
         this.maxGridCells = this.gridCols * this.gridRows;
 
         // Pipelines
@@ -93,6 +103,75 @@ export class AVBDSolver {
         this.isReadingSpawns = false;
     }
 
+    resetParams() {
+        // Physics
+        this._gravity = 4.0;
+        this._restitution = 0.8;
+        this._damping = 0.999;
+        this._substeps = 2;
+        this._iterations = 5;
+        this.simSpeed = 1.0;
+        this.ballRadius = 10;
+        this._alpha = 0.001;
+        this._beta = 0.2;
+
+        // Interaction
+        this._mousePower = 250;
+        this._mouseRadius = 200;
+
+        // Render
+        this._bloomStrength = 0.2;
+        this._bloomRadius = 0.2;
+        this._bloomThreshold = 0.9;
+        this._aaEnabled = true;
+        this._bloomEnabled = true;
+
+        // Particles
+        const oldParticleCount = this.particleCount;
+        this.particleCount = 4000;
+
+        // Scene Specifics
+        // Galton
+        this.galtonSpawnerDistance = 100;
+        this.galtonPegSize = 3;
+        this.galtonSpawnRate = 5;
+        this.galtonBucketSpacing = 40;
+        this.galtonBucketHeight = Math.floor(this.height * 0.4);
+
+        // Fireworks
+        this.fireworksSpawnRate = 3.0; // Default from Overlay
+        this.fireworksExplosionSize = 100;
+        this.fireworksRocketSpeed = 2.2; // Default from Overlay
+
+        // Planetary
+        this.blackHoleGravity = 2.0;
+        this.blackHoleSwirl = 0.0;
+        this.planetaryBallVariance = 0.5;
+
+        // Fountain
+        this._fountainSpawnRate = 500;
+
+        // Wave
+        if (this.scenes['wave']) {
+            this.scenes['wave'].waveAmplitude = 200;
+            this.scenes['wave'].waveSpeed = 2.0;
+            this.scenes['wave'].waveFrequency = 3.0;
+            this.scenes['wave'].particleDensity = 10;
+        }
+
+        // Mixer
+        if (this.scenes['collision']) {
+            this.scenes['collision'].mixerPower = 3000;
+            this.scenes['collision'].mixerMode = 'vortex';
+        }
+
+        // Update uniforms
+        this.updateParams();
+
+        // Re-init particles to apply all changes (especially scene-specific ones like Galton pegs)
+        this.initParticles(this.currentScene);
+    }
+
     async init() {
         await this.loadShaders();
         this.createBuffers();
@@ -105,14 +184,15 @@ export class AVBDSolver {
 
     async loadShaders() {
         const loadShader = async (path) => {
-            const response = await fetch(path);
+            const response = await fetch(new URL(path, import.meta.url).href);
             return await response.text();
         };
 
-        this.spatialHashShader = await loadShader('./src/shaders/spatial_hash.wgsl');
-        this.colorGraphShader = await loadShader('./src/shaders/color_graph.wgsl');
-        this.solverShader = await loadShader('./src/shaders/avbd_solver.wgsl');
-        this.renderShader = await loadShader('./src/shaders/render.wgsl');
+        this.spatialHashShader = await loadShader('../shaders/spatial_hash.wgsl');
+        this.colorGraphShader = await loadShader('../shaders/color_graph.wgsl');
+        this.solverShader = await loadShader('../shaders/avbd_solver.wgsl');
+        this.renderShader = await loadShader('../shaders/render.wgsl');
+        this.colorUpdateShader = await loadShader('../shaders/update_colors.wgsl');
     }
 
     createBuffers() {
@@ -133,7 +213,7 @@ export class AVBDSolver {
 
         this.gridCellsBuffer = this.bufferManager.createBuffer(
             'gridCells',
-            this.maxGridCells * 256 * 4,
+            this.maxGridCells * 128 * 4,
             GPUBufferUsage.STORAGE
         );
 
@@ -144,11 +224,11 @@ export class AVBDSolver {
             GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         );
 
-        this.simParamsBuffer = this.bufferManager.createBuffer(
-            'simParams',
-            128, // Increased to 128 to be safe (struct is ~76 bytes)
-            GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-        );
+        this.simParamsBuffer = this.device.createBuffer({
+            label: 'simParams',
+            size: 80, // Increased to include beta
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
 
         this.renderParamsBuffer = this.bufferManager.createBuffer(
             'renderParams',
@@ -182,19 +262,29 @@ export class AVBDSolver {
 
         this.spawnerBlocked = [0, 0, 0];
 
-        // 6. Color Update Buffers (Persistent)
-        // Allocate max size initially to avoid resizing churn
-        this.colorUpdateBuffer = this.device.createBuffer({
-            label: 'colorUpdatePersistent',
-            size: this.maxParticles * 4, // u32 per particle
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        });
+        // 6. Color Update Buffers
+        this.colorUpdateBuffer = this.bufferManager.createBuffer(
+            'colorUpdate',
+            this.maxParticles * 4, // 1 uint per particle
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        );
 
-        this.colorParamsBuffer = this.device.createBuffer({
-            label: 'colorParamsPersistent',
-            size: 16, // 2 * u32 (8 bytes) + padding (8 bytes) -> 16 bytes required for Uniform alignment
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-        });
+        this.colorParamsBuffer = this.bufferManager.createBuffer(
+            'colorParams',
+            16, // 4 uints
+            GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        );
+
+
+
+        // 7. Wall Lambda Buffer (Persistent AVBD State)
+        this.wallLambdasBuffer = this.bufferManager.createBuffer(
+            'wallLambdas',
+            this.maxParticles * 16, // vec4<f32> per particle
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        );
+
+
     }
 
     createPipelines() {
@@ -326,44 +416,15 @@ export class AVBDSolver {
         });
 
         // 5. Color Update Pipeline
-        const colorUpdateShader = `
-            struct Particle {
-                pos: vec2<f32>,
-                vel: vec2<f32>,
-                radius: f32,
-                color: u32,
-                mass: f32,
-                invMass: f32,
-                padding: vec2<f32>
-            };
-
-            struct Params {
-                startIndex: u32,
-                count: u32,
-                pad1: u32,
-                pad2: u32
-            };
-
-            @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
-            @group(0) @binding(1) var<storage, read> newColors: array<u32>;
-            @group(0) @binding(2) var<uniform> params: Params;
-
-            @compute @workgroup_size(64)
-            fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-                let idx = global_id.x;
-                if (idx >= params.count) { return; }
-                
-                particles[params.startIndex + idx].color = newColors[idx];
-            }
-        `;
-
         this.colorUpdatePipeline = this.device.createComputePipeline({
             layout: 'auto',
             compute: {
-                module: this.device.createShaderModule({ code: colorUpdateShader }),
+                module: this.device.createShaderModule({ code: this.colorUpdateShader }),
                 entryPoint: 'main'
             }
         });
+
+
     }
 
     createBindGroups() {
@@ -376,7 +437,8 @@ export class AVBDSolver {
                 { binding: 2, resource: { buffer: this.gridCellsBuffer } },
                 { binding: 3, resource: { buffer: this.gridParamsBuffer } },
                 { binding: 4, resource: { buffer: this.simParamsBuffer } },
-                { binding: 5, resource: { buffer: this.obstacleBuffer } }
+                { binding: 5, resource: { buffer: this.obstacleBuffer } },
+                { binding: 6, resource: { buffer: this.wallLambdasBuffer } }
             ]
         });
 
@@ -414,6 +476,7 @@ export class AVBDSolver {
     }
 
     initParticles(sceneType = 'grid') {
+        this.gravityType = 0; // Reset gravity type to default (Down)
         this.currentScene = sceneType; // CRITICAL FIX: Update current scene state
 
         // 1. Determine required count
@@ -478,22 +541,51 @@ export class AVBDSolver {
         // Use the ArrayBuffer directly to ensure we copy the raw bytes, 
         // preventing any float/NaN canonicalization issues in Firefox.
         this.bufferManager.writeBuffer('particles', this.simData.buffer);
+
+        // Clear Wall Lambdas (Reset persistent forces)
+        if (this.wallLambdasBuffer) {
+            const zeroLambdas = new Float32Array(this.maxParticles * 4); // vec4 per particle
+            this.bufferManager.writeBuffer('wallLambdas', zeroLambdas.buffer);
+        }
+
+
+
+
+
+        // Wave Scene Specifics
+        if (sceneType === 'wave') {
+            this.substeps = 64;
+        } else if (this.substeps > 20) {
+            this.substeps = 4;
+        }
+
         this.updateParams();
     }
 
     getPegCount() {
         const pegSpacingX = 30;
-        const cols = Math.floor(window.innerWidth / pegSpacingX);
+        const cols = Math.floor(this.width / pegSpacingX);
         const rows = 20;
         return rows * cols;
+    }
+
+    resize(width, height) {
+        this.width = width;
+        this.height = height;
+        this.gridCols = Math.ceil(this.width / this.cellSize);
+        this.gridRows = Math.ceil(this.height / this.cellSize);
+        this.maxGridCells = this.gridCols * this.gridRows;
+
+        // Re-create grid buffers if needed (omitted for now as maxGridCells is usually large enough or we just accept it)
+        // Ideally we should recreate buffers if size increases significantly.
     }
 
     setRadiusAndReset(newRadius) {
         this.ballRadius = newRadius;
         // Adaptive Grid: Cell size must be > diameter (2*r) for 3x3 check to work.
-        // We use 2.5 * r to be safe and efficient.
-        // Minimum 20 to avoid too many cells for small particles.
-        this.cellSize = Math.max(20, this.ballRadius * 2.5);
+        // We use 2.1 * r to be safe and efficient.
+        // Minimum 5 to allow for smaller particles without excessive cells.
+        this.cellSize = Math.max(5, this.ballRadius * 2.1);
         this.initParticles(this.currentScene);
     }
 
@@ -579,8 +671,8 @@ export class AVBDSolver {
         // 5. No Cleanup Needed (Persistent Buffers)
     }
 
-    setColorScheme(scheme) {
-        this.colorScheme = scheme;
+    applyColorScheme() {
+        const scheme = this._colorScheme;
 
         let loopLimit = this.particleCount;
         let start = 0;
@@ -606,6 +698,41 @@ export class AVBDSolver {
 
         // Upload to GPU
         this.updateColorsGPU(colors, start, loopLimit);
+    }
+
+    set colorScheme(val) {
+        this._colorScheme = val;
+        if (this.initialized) {
+            this.applyColorScheme();
+        }
+    }
+
+    get colorScheme() {
+        return this._colorScheme;
+    }
+
+    updateColors() {
+        if (!this.simDataUint) return;
+
+        // Update colors for all potential particles
+        // We iterate up to maxParticles because we don't know which are active/emitted,
+        // and updating all is safer than tracking indices. 
+        // Performance: 300k iterations is ~5-10ms on CPU. Acceptable for UI click.
+
+        for (let i = 0; i < this.maxParticles; i++) {
+            // Skip static particles (pegs) if we want to preserve their color?
+            // Usually pegs are white or fixed. 
+            // If we want themes to apply to pegs too, we include them.
+            // Let's include them for now.
+
+            const color = this.getColor(i, this.maxParticles);
+            // Color is at offset 3 (floats) = index 3 (uints)
+            // Stride is 10 floats = 10 uints
+            this.simDataUint[i * 10 + 3] = color;
+        }
+
+        // Upload to GPU
+        this.bufferManager.writeBuffer('particles', this.simData.buffer);
     }
 
     getColor(i, total) {
@@ -916,15 +1043,15 @@ export class AVBDSolver {
 
     updateParams() {
         // Recalculate grid dimensions on update (handles resize)
-        this.gridCols = Math.ceil(window.innerWidth / this.cellSize);
-        this.gridRows = Math.ceil(window.innerHeight / this.cellSize);
+        this.gridCols = Math.ceil(this.width / this.cellSize);
+        this.gridRows = Math.ceil(this.height / this.cellSize);
 
         const buffer = new ArrayBuffer(32);
         const floatView = new Float32Array(buffer);
         const uintView = new Uint32Array(buffer);
 
-        floatView[0] = window.innerWidth;
-        floatView[1] = window.innerHeight;
+        floatView[0] = this.width;
+        floatView[1] = this.height;
         floatView[2] = this.cellSize;
 
         uintView[3] = this.gridCols;
@@ -938,11 +1065,71 @@ export class AVBDSolver {
         uintView[5] = activeCount;
         floatView[6] = this.galtonSpawnerDistance || 100;
 
-        this.device.queue.writeBuffer(this.gridParamsBuffer, 0, buffer);
+        // Dynamic Grid Sizing
+        // Ensure cell size is always optimal for the current ball radius.
+        // Min Cell Size = 4.0 (allocated in constructor).
+        // Target Cell Size = Radius * 3.0 (Smoother grid, fewer artifacts).
+        this.cellSize = Math.max(4.0, this.ballRadius * 3.0);
+        this.gridCols = Math.ceil(this.width / this.cellSize);
+        this.gridRows = Math.ceil(this.height / this.cellSize);
+
+        // Update Grid Params
+        // Struct Layout:
+        // width (f32), height (f32), cellSize (f32), cols (u32)
+        // rows (u32), maxParticles (u32), padding (f32), padding (f32)
+        const gridBuffer = new ArrayBuffer(32);
+        const gridFloatView = new Float32Array(gridBuffer);
+        const gridUintView = new Uint32Array(gridBuffer);
+
+        gridFloatView[0] = this.width;
+        gridFloatView[1] = this.height;
+        gridFloatView[2] = this.cellSize;
+        gridUintView[3] = this.gridCols;      // Offset 12
+        gridUintView[4] = this.gridRows;      // Offset 16
+        gridUintView[5] = this.maxParticles;  // Offset 20
+        gridFloatView[6] = this.galtonSpawnerDistance || 100; // Offset 24
+
+        this.device.queue.writeBuffer(this.gridParamsBuffer, 0, gridBuffer);
+
+        // Update Sim Params
+        // Struct Layout (std140):
+        // dt (f32), gravity (f32), damping (f32), restitution (f32)
+        // alpha (f32), beta (f32), mousePower (f32), mouseRadius (f32)
+        // mouseX (f32), mouseY (f32), mouseButton (u32), width (f32)
+        // height (f32), subSteps (u32), iterations (u32), padding (f32)
+
+        // Note: We need to match the struct layout in avbd_solver.wgsl exactly.
+        // Let's verify the shader struct first.
+        // But assuming standard layout:
+        const simData = new ArrayBuffer(80); // 20 floats/uints * 4 bytes
+        const simF32 = new Float32Array(simData);
+        const simU32 = new Uint32Array(simData);
+
+        simF32[0] = 0.016 / this.substeps; // dt per substep
+        simF32[1] = this.gravity;
+        simF32[2] = this.damping;
+        simF32[3] = this.restitution;
+
+        simF32[4] = this.alpha;
+        simF32[5] = this.beta;
+        simF32[6] = this.mousePower;
+        simF32[7] = this.mouseRadius;
+
+        simF32[8] = this.mouse ? this.mouse.x : 0;
+        simF32[9] = this.mouse ? this.mouse.y : 0;
+        simU32[10] = this.mouse ? this.mouse.buttons : 0;
+        simF32[11] = this.width;
+
+        simF32[12] = this.height;
+        simU32[13] = this.substeps;
+        simU32[14] = this.iterations;
+        simF32[15] = 0; // Padding
+
+        this.device.queue.writeBuffer(this.simParamsBuffer, 0, simData);
 
         const renderData = new Float32Array([
-            window.innerWidth,
-            window.innerHeight,
+            this.width,
+            this.height,
             this.bloomEnabled ? 1.0 : 0.0,
             this.aaEnabled ? 1.0 : 0.0,
             this.bloomThreshold,
@@ -1111,7 +1298,8 @@ export class AVBDSolver {
             this.blackHoleGravity,
             this.blackHoleSwirl,
             this.blackHoleRadius,
-            this.blackHoleRepulsion
+            this.blackHoleRepulsion,
+            this.beta // Offset 76
         ]);
         this.device.queue.writeBuffer(this.simParamsBuffer, 60, bhData);
 
@@ -1134,8 +1322,9 @@ export class AVBDSolver {
         }
 
         // Substep Loop in JavaScript for True Stability
-        // We divide dt by substeps here, but we dispatch the pipeline 'substeps' times
-        const subDt = (dt * this.simSpeed) / this.substeps;
+        // Clamp dt to prevent explosion spiral if FPS drops
+        const safeDt = Math.min(dt, 0.02);
+        const subDt = (safeDt * this.simSpeed) / this.substeps;
 
         // Update dt in simParams buffer for the shader (shader sees subDt as dt)
         const subSimData = new Float32Array([
@@ -1147,8 +1336,8 @@ export class AVBDSolver {
             mouse.y,
             this.mouseRadius || 200,
             this.mousePower || 50,
-            mouse.dx || 0,
-            mouse.dy || 0
+            (mouse.dx || 0) / this.substeps,
+            (mouse.dy || 0) / this.substeps
         ]);
         this.device.queue.writeBuffer(this.simParamsBuffer, 0, subSimData);
 
@@ -1159,25 +1348,27 @@ export class AVBDSolver {
         // For simplicity/performance, let's try to do it with multiple passes for now.
 
         if (!this.paused) {
+            // 1. Clear Grid Counters & Build Grid (ONCE per frame)
+            // This decouples broadphase from narrowphase for massive performance.
+            commandEncoder.clearBuffer(this.gridCountersBuffer, 0, this.maxGridCells * 4);
+
+            const passEncoder = commandEncoder.beginComputePass();
+
+            // Spatial Hash
+            passEncoder.setPipeline(this.spatialHashPipeline);
+            passEncoder.setBindGroup(0, this.spatialHashBindGroup);
+            passEncoder.dispatchWorkgroups(Math.ceil(totalActive / 64));
+
+            // 2. Solver Substeps (Multiple passes using the SAME grid)
+            // This provides stability (small dt) without the overhead of rebuilding the grid.
+            passEncoder.setPipeline(this.solverPipeline);
+            passEncoder.setBindGroup(0, this.solverBindGroup);
+
             for (let step = 0; step < this.substeps; step++) {
-                // 1. Clear Grid Counters
-                commandEncoder.clearBuffer(this.gridCountersBuffer, 0, this.maxGridCells * 4);
-
-                // 2. Compute Pass
-                const passEncoder = commandEncoder.beginComputePass();
-
-                // Spatial Hash
-                passEncoder.setPipeline(this.spatialHashPipeline);
-                passEncoder.setBindGroup(0, this.spatialHashBindGroup);
                 passEncoder.dispatchWorkgroups(Math.ceil(totalActive / 64));
-
-                // Solver
-                passEncoder.setPipeline(this.solverPipeline);
-                passEncoder.setBindGroup(0, this.solverBindGroup);
-                passEncoder.dispatchWorkgroups(Math.ceil(totalActive / 64));
-
-                passEncoder.end();
             }
+
+            passEncoder.end();
         }
 
         // Check Spawns Pipeline (After physics, before render)
@@ -1225,7 +1416,9 @@ export class AVBDSolver {
         this.device.queue.submit([commandEncoder.finish()]);
 
         // Check Spawns (Async Readback)
-        this.readSpawnStatus();
+        if (this.currentScene === 'galton') {
+            this.readSpawnStatus();
+        }
     }
 
     async readSpawnStatus() {
@@ -1264,7 +1457,7 @@ export class AVBDSolver {
     }
 
     resizeParticleBuffer(newCount) {
-        console.log(`Resizing particle buffer from ${this.maxParticles} to ${newCount}`);
+        console.log(`Resizing particle buffer from ${this.maxParticles} to ${newCount} `);
         const newBytes = newCount * 40;
 
         const newBuffer = this.bufferManager.createBuffer(
@@ -1287,4 +1480,101 @@ export class AVBDSolver {
         // Recreate Bind Groups that depend on particleBuffer
         this.createBindGroups();
     }
+
+    // --- Getters and Setters for Physics Parameters ---
+    // These ensure that changing a property triggers a GPU buffer update.
+
+    set gravity(v) { this._gravity = v; this.updateParams(); }
+    get gravity() { return this._gravity; }
+
+    set restitution(v) { this._restitution = v; this.updateParams(); }
+    get restitution() { return this._restitution; }
+
+    set damping(v) { this._damping = v; this.updateParams(); }
+    get damping() { return this._damping; }
+
+    set alpha(v) { this._alpha = v; this.updateParams(); }
+    get alpha() { return this._alpha; }
+
+    set beta(v) { this._beta = v; this.updateParams(); }
+    get beta() { return this._beta; }
+
+    set mousePower(v) { this._mousePower = v; this.updateParams(); }
+    get mousePower() { return this._mousePower; }
+
+    set mouseRadius(v) { this._mouseRadius = v; this.updateParams(); }
+    get mouseRadius() { return this._mouseRadius; }
+
+    set bloomStrength(v) { this._bloomStrength = v; this.updateParams(); }
+    get bloomStrength() { return this._bloomStrength; }
+
+    set bloomRadius(v) { this._bloomRadius = v; this.updateParams(); }
+    get bloomRadius() { return this._bloomRadius; }
+
+    set bloomThreshold(v) { this._bloomThreshold = v; this.updateParams(); }
+    get bloomThreshold() { return this._bloomThreshold; }
+
+    set aaEnabled(v) { this._aaEnabled = v; this.updateParams(); }
+    get aaEnabled() { return this._aaEnabled; }
+
+    set bloomEnabled(v) { this._bloomEnabled = v; this.updateParams(); }
+    get bloomEnabled() { return this._bloomEnabled; }
+
+    set substeps(v) { this._substeps = v; this.updateParams(); }
+    get substeps() { return this._substeps; }
+
+    set iterations(v) { this._iterations = v; this.updateParams(); }
+    get iterations() { return this._iterations; }
+
+    // --- Scene Specific Setters ---
+
+    set ballRadius(v) {
+        this._ballRadius = v;
+        // Update cell size logic to match updateParams
+        this.cellSize = Math.max(4.0, this._ballRadius * 3.0);
+        this.updateParams();
+    }
+    get ballRadius() { return this._ballRadius; }
+
+    set galtonSpawnerDistance(v) { this._galtonSpawnerDistance = v; this.updateParams(); }
+    get galtonSpawnerDistance() { return this._galtonSpawnerDistance; }
+
+    set galtonPegSize(v) { this._galtonPegSize = v; this.updateParams(); }
+    get galtonPegSize() { return this._galtonPegSize; }
+
+    set galtonSpawnRate(v) { this._galtonSpawnRate = v; this.updateParams(); }
+    get galtonSpawnRate() { return this._galtonSpawnRate; }
+
+    set galtonBucketSpacing(v) { this._galtonBucketSpacing = v; this.updateParams(); }
+    get galtonBucketSpacing() { return this._galtonBucketSpacing; }
+
+    set galtonBucketHeight(v) { this._galtonBucketHeight = v; this.updateParams(); }
+    get galtonBucketHeight() { return this._galtonBucketHeight; }
+
+    set blackHoleGravity(v) { this._blackHoleGravity = v; this.updateParams(); }
+    get blackHoleGravity() { return this._blackHoleGravity; }
+
+    set blackHoleSwirl(v) { this._blackHoleSwirl = v; this.updateParams(); }
+    get blackHoleSwirl() { return this._blackHoleSwirl; }
+
+    set blackHoleRadius(v) { this._blackHoleRadius = v; this.updateParams(); }
+    get blackHoleRadius() { return this._blackHoleRadius; }
+
+    set blackHoleRepulsion(v) { this._blackHoleRepulsion = v; this.updateParams(); }
+    get blackHoleRepulsion() { return this._blackHoleRepulsion; }
+
+    set planetaryBallVariance(v) { this._planetaryBallVariance = v; this.updateParams(); }
+    get planetaryBallVariance() { return this._planetaryBallVariance; }
+
+    set fireworksSpawnRate(v) { this._fireworksSpawnRate = v; this.updateParams(); }
+    get fireworksSpawnRate() { return this._fireworksSpawnRate; }
+
+    set fireworksExplosionSize(v) { this._fireworksExplosionSize = v; this.updateParams(); }
+    get fireworksExplosionSize() { return this._fireworksExplosionSize; }
+
+    set fireworksRocketSpeed(v) { this._fireworksRocketSpeed = v; this.updateParams(); }
+    get fireworksRocketSpeed() { return this._fireworksRocketSpeed; }
+
+    set fountainSpawnRate(v) { this._fountainSpawnRate = v; this.updateParams(); }
+    get fountainSpawnRate() { return this._fountainSpawnRate; }
 }

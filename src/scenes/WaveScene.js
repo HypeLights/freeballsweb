@@ -35,10 +35,10 @@ export class WaveScene extends Scene {
         const cols = gridSize;
 
         // Add margins to prevent edge glitches (5% on each side)
-        const marginX = window.innerWidth * 0.05;
-        const marginY = window.innerHeight * 0.05;
-        const usableWidth = window.innerWidth - (marginX * 2);
-        const usableHeight = window.innerHeight - (marginY * 2);
+        const marginX = this.solver.width * 0.05;
+        const marginY = this.solver.height * 0.05;
+        const usableWidth = this.solver.width - (marginX * 2);
+        const usableHeight = this.solver.height - (marginY * 2);
 
         const spacingX = usableWidth / (cols - 1);
         const spacingY = usableHeight / (rows - 1);

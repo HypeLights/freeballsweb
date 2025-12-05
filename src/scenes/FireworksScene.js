@@ -185,7 +185,7 @@ export class FireworksScene extends Scene {
         this.solver.staticCount = 0;
         this.solver.gravityType = 0;
         this.solver.gravity = 4.0;
-        this.solver.damping = 0.96; // Good air resistance
+        this.solver.damping = 0.999; // Good air resistance
         this.solver.restitution = 0.5;
 
         // User Request: Default ball size 2.0
@@ -293,8 +293,8 @@ export class FireworksScene extends Scene {
             this.nextParticleIndex = (this.nextParticleIndex + 1) % maxBufferParticles;
         }
 
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        const width = this.solver.width;
+        const height = this.solver.height;
 
         const startX = width * 0.2 + Math.random() * width * 0.6;
         const startY = height + 20; // Just below screen

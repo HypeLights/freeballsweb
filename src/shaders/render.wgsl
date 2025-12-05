@@ -50,9 +50,8 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var pos = vec2<f32>(0.0, 0.0);
     var uv = vec2<f32>(0.0, 0.0);
     
-    // Expand quad for bloom glow
-    // Increased to 8.0 to prevent "square" clipping of the glow for large particles
-    let expansion = 8.0; 
+    // Optimized: Reduced expansion from 8.0 to 1.2 for massive fill-rate boost.
+    let expansion = 1.2; 
     
     if (in.vertexIndex == 0u) { pos = vec2<f32>(-expansion, -expansion); uv = vec2<f32>(0.0, 1.0); }
     else if (in.vertexIndex == 1u) { pos = vec2<f32>(expansion, -expansion); uv = vec2<f32>(1.0, 1.0); }
@@ -69,7 +68,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(x, y, 0.0, 1.0);
     out.color = unpackColor(p.color);
-    out.uv = uv; // UVs are now 0-1 across the EXPANDED quad
+    out.uv = uv; 
     out.shape = p.padding.x; // 0 = Circle, 1 = Square
     
     return out;
@@ -77,74 +76,33 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Re-map UVs to center 0.5, 0.5
-    // The quad is 8x size (expansion=8.0) -> Total width 16.0 radii
-    // UV range 0.0-1.0 covers -8R to +8R.
-    // Center is 0.5.
-    // Distance from center 0.5 in UV space:
-    // 1 Radius = 1/16 = 0.0625 UV units.
-    
+    // Center is 0.5, 0.5
     let center = vec2<f32>(0.5, 0.5);
     let uvDist = length(in.uv - center);
     
-    // 1 Radius = 0.0625 UV distance
-    // Normalized distance (0 = center, 1 = edge of particle)
-    let dist = uvDist * 16.0; 
+    // Expansion is 1.2.
+    // 1.0 Radius = 0.5 / 1.2 = 0.4166 in UV space.
+    // Normalized Dist: uvDist / (0.5 / 1.2) = uvDist * 2.4
+    let dist = uvDist * 2.4;
 
     // Shape Logic
     if (in.shape > 0.5) {
-        // Square
-        // Simple box SDF
-        let d = max(abs(in.uv.x - 0.5), abs(in.uv.y - 0.5)) * 4.0;
+        let d = max(abs(in.uv.x - 0.5), abs(in.uv.y - 0.5)) * 2.4;
         if (d > 1.0) { discard; }
         return vec4<f32>(in.color.rgb, 1.0);
     }
 
     // Circle Logic
-    var alpha = 0.0;
-    var glow = vec3<f32>(0.0);
+    if (dist > 1.0) { discard; }
 
-    // Hard Core
-    if (dist <= 1.0) {
-        alpha = 1.0;
-        
-        // Anti-aliasing
-        if (params.aaEnabled > 0.5) {
-            // Smooth edge
-            alpha = 1.0 - smoothstep(0.9, 1.0, dist);
-        }
+    var alpha = 1.0;
+    // Anti-aliasing
+    if (params.aaEnabled > 0.5) {
+        alpha = 1.0 - smoothstep(0.9, 1.0, dist);
     }
 
-    // Bloom / Glow
-    if (params.bloomEnabled > 0.5) {
-        // Glow falls off outside the core (dist > 1.0)
-        // bloomThreshold: 0.0 = Start from center, 0.5 = Start from edge of core (approx)
-        let threshold = params.bloomThreshold; 
-        
-        // bloomRadius: Controls spread. Higher = Wider.
-        // Exponent = Constant / Radius. 
-        // If Radius is 0.5, Exponent ~ 4.0. If Radius is 1.0, Exponent ~ 2.0.
-        let exponent = 2.0 / max(0.01, params.bloomRadius);
-
-        let glowDist = max(0.0, dist - threshold); 
-        let glowIntensity = exp(-glowDist * exponent) * params.bloomStrength * 0.5;
-        glow = in.color.rgb * glowIntensity;
-    }
-
-    // Combine core color and glow
-    // For Premultiplied Alpha with (One, OneMinusSrcAlpha):
-    // RGB = Emitted Light (Color * Alpha + Glow)
-    // A = Occlusion (Alpha)
-    
-    let finalColor = in.color.rgb * alpha + glow;
-    let finalAlpha = alpha;
-
-    // Discard only if no light and no occlusion
-    if (finalAlpha < 0.01 && length(glow) < 0.01) {
-        discard;
-    }
-    
-    return vec4<f32>(finalColor, finalAlpha);
+    // Simple Color Output (No expensive per-particle bloom)
+    return vec4<f32>(in.color.rgb * alpha, alpha);
 }
 
 // --- Obstacle Rendering ---

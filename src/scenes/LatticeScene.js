@@ -9,8 +9,8 @@ export class LatticeScene extends Scene {
         this.solver.damping = 0.95; // High damping to stop movement quickly
         this.solver.restitution = 0.5;
 
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        const width = this.solver.width;
+        const height = this.solver.height;
 
         // Hexagonal Packing
         // x spacing = 2 * r

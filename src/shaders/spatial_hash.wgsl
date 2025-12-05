@@ -22,14 +22,22 @@ struct SimParams {
     gravity: f32,
     damping: f32,
     restitution: f32,
-    mousePos: vec2<f32>,
+    mouseX: f32,
+    mouseY: f32,
     mouseRadius: f32,
     mousePower: f32,
+    mouseDx: f32,
+    mouseDy: f32,
     mouseButton: u32,
     iterations: u32,
     alpha: f32,
     obstacleCount: u32,
-    gravityType: u32 // 0 = Down, 1 = Center
+    gravityType: u32,
+    blackHoleGravity: f32,
+    blackHoleSwirl: f32,
+    blackHoleRadius: f32,
+    blackHoleRepulsion: f32,
+    beta: f32
 };
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
@@ -38,7 +46,7 @@ struct SimParams {
 @group(0) @binding(3) var<uniform> params: GridParams;
 @group(0) @binding(4) var<uniform> simParams: SimParams;
 
-const MAX_PER_CELL: u32 = 256;
+const MAX_PER_CELL: u32 = 128;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3<u32>) {
