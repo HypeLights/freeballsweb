@@ -20,7 +20,7 @@ export class CollisionScene extends Scene {
         // Mixer settings - preserved across reinits
         if (this.mixerEnabled === undefined) this.mixerEnabled = false;
         if (this.mixerMode === undefined) this.mixerMode = 'vortex';
-        if (this.mixerPower === undefined) this.mixerPower = 3000;
+        if (this.mixerPower === undefined) this.mixerPower = 1500;
 
         // --- Group 1: Left Side (Fire) ---
         // Target center: 20% width, 50% height
@@ -140,7 +140,13 @@ export class CollisionScene extends Scene {
     update(dt) {
         this.solver.gravity = 0.0;
 
-        if (!this.mixerEnabled || !this.mixerPipeline) return;
+        // Read mixer properties from solver (synced from UI) or fallback to local
+        const mixerEnabled = this.solver.mixerEnabled !== undefined ? this.solver.mixerEnabled : this.mixerEnabled;
+        const mixerMode = this.solver.mixerMode || this.mixerMode || 'vortex';
+        const mixerPower = this.solver.mixerPower !== undefined ? this.solver.mixerPower : (this.mixerPower || 3000);
+        const mixerSmash = this.solver.mixerSmash !== undefined ? this.solver.mixerSmash : this.mixerSmash;
+
+        if (!mixerEnabled || !this.mixerPipeline) return;
 
         this.time += dt;
 
@@ -151,17 +157,13 @@ export class CollisionScene extends Scene {
 
         // Map mode string to uint
         let modeIdx = 0; // Default Vortex
-        switch (this.mixerMode) {
+        switch (mixerMode) {
             case 'vortex': modeIdx = 0; break;
             case 'vertical': modeIdx = 1; break;
             case 'horizontal': modeIdx = 2; break;
             case 'chaos': modeIdx = 3; break;
             case 'corners': modeIdx = 4; break;
-        }
-
-        // Override mode if Smash is active (Button Held)
-        if (this.mixerSmash) {
-            modeIdx = 5;
+            case 'smash': modeIdx = 5; break;
         }
 
         // Update Params
@@ -169,7 +171,7 @@ export class CollisionScene extends Scene {
             this.solver.width,      // width
             this.solver.height,     // height
             this.time,             // time
-            this.mixerPower,       // power
+            mixerPower,            // power
         ]);
 
         // Write remaining uint params

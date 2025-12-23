@@ -13,6 +13,7 @@ export class AVBDSolver {
         this.gpu = gpuContext;
         this.device = gpuContext.device;
         this.bufferManager = new BufferManager(this.device);
+        console.log("AVBDSolver: V_FINAL_FIX_LOADED");
 
         // Scenes
         this.scenes = {
@@ -26,6 +27,7 @@ export class AVBDSolver {
             'wave': new WaveScene(this)
         };
         this.currentSceneObject = this.scenes['grid'];
+        this.currentScene = 'grid';
 
         // Simulation Parameters
         this.maxParticles = 1000000;
@@ -45,7 +47,7 @@ export class AVBDSolver {
         this._iterations = 4;
         this._ballRadius = 10;
 
-        this._blackHoleGravity = 4.0;
+        this._blackHoleGravity = 0.0;
         this._blackHoleRepulsion = 1.0;
         this._blackHoleSwirl = 1.0;
         this._blackHoleRadius = 30.0;
@@ -69,6 +71,19 @@ export class AVBDSolver {
         this._fireworksExplosionSize = 100;
         this._fireworksRocketSpeed = 1.5;
         this._fireworksExplosionSpeed = 1.0;
+
+        // Wave Parameters
+        this.waveAmplitude = 24;
+        this.waveSpeed = 2.0;
+        this.waveFrequency = 3.0;
+        this.waveMode = 'interference';
+        this.particleDensity = 13;
+
+        // Mixer Parameters (for CollisionScene)
+        this.mixerEnabled = false;
+        this.mixerMode = 'vortex';
+        this.mixerPower = 1500;
+        this.mixerSmash = false;
 
         // Planetary Parameters
         this._planetaryBallVariance = 0.5;
@@ -105,7 +120,7 @@ export class AVBDSolver {
 
     resetParams() {
         // Physics
-        this._gravity = 4.0;
+        this._gravity = 6.0;
         this._restitution = 0.8;
         this._damping = 0.999;
         this._substeps = 2;
@@ -144,9 +159,10 @@ export class AVBDSolver {
         this.fireworksRocketSpeed = 2.2; // Default from Overlay
 
         // Planetary
-        this.blackHoleGravity = 2.0;
+        this.blackHoleGravity = 0.0;
         this.blackHoleSwirl = 0.0;
         this.planetaryBallVariance = 0.5;
+        this.gravityType = 0; // Ensure gravity type is reset to standard (Down)
 
         // Fountain
         this._fountainSpawnRate = 500;
@@ -201,7 +217,7 @@ export class AVBDSolver {
         this.particleBuffer = this.bufferManager.createBuffer(
             'particles',
             this.maxParticles * particleStride,
-            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_SRC
         );
 
         // 2. Grid Buffers
@@ -508,7 +524,7 @@ export class AVBDSolver {
             this.particleBuffer = this.bufferManager.createBuffer(
                 'particles',
                 neededBytes,
-                GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX
+                GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_SRC
             );
 
             this.checkSpawnBindGroup = this.device.createBindGroup({
@@ -1042,29 +1058,6 @@ export class AVBDSolver {
     // getRainbowColor removed. Use getColor(index, total) instead.
 
     updateParams() {
-        // Recalculate grid dimensions on update (handles resize)
-        this.gridCols = Math.ceil(this.width / this.cellSize);
-        this.gridRows = Math.ceil(this.height / this.cellSize);
-
-        const buffer = new ArrayBuffer(32);
-        const floatView = new Float32Array(buffer);
-        const uintView = new Uint32Array(buffer);
-
-        floatView[0] = this.width;
-        floatView[1] = this.height;
-        floatView[2] = this.cellSize;
-
-        uintView[3] = this.gridCols;
-        uintView[4] = this.gridRows;
-
-        let activeCount = this.particleCount;
-        if (this.currentScene === 'galton') {
-            activeCount = this.staticCount + this.emittedCount;
-        }
-
-        uintView[5] = activeCount;
-        floatView[6] = this.galtonSpawnerDistance || 100;
-
         // Dynamic Grid Sizing
         // Ensure cell size is always optimal for the current ball radius.
         // Min Cell Size = 4.0 (allocated in constructor).
@@ -1092,38 +1085,58 @@ export class AVBDSolver {
         this.device.queue.writeBuffer(this.gridParamsBuffer, 0, gridBuffer);
 
         // Update Sim Params
-        // Struct Layout (std140):
-        // dt (f32), gravity (f32), damping (f32), restitution (f32)
-        // alpha (f32), beta (f32), mousePower (f32), mouseRadius (f32)
-        // mouseX (f32), mouseY (f32), mouseButton (u32), width (f32)
-        // height (f32), subSteps (u32), iterations (u32), padding (f32)
+        // Struct Layout (std140) - Matches avbd_solver.wgsl
+        // 0: dt
+        // 1: gravity
+        // 2: damping
+        // 3: restitution
+        // 4: mouseX
+        // 5: mouseY
+        // 6: mouseRadius
+        // 7: mousePower
+        // 8: mouseDx
+        // 9: mouseDy
+        // 10: mouseButton
+        // 11: iterations
+        // 12: alpha
+        // 13: obstacleCount
+        // 14: gravityType
+        // 15: blackHoleGravity
+        // 16: blackHoleSwirl
+        // 17: blackHoleRadius
+        // 18: blackHoleRepulsion
+        // 19: beta
 
-        // Note: We need to match the struct layout in avbd_solver.wgsl exactly.
-        // Let's verify the shader struct first.
-        // But assuming standard layout:
         const simData = new ArrayBuffer(80); // 20 floats/uints * 4 bytes
         const simF32 = new Float32Array(simData);
         const simU32 = new Uint32Array(simData);
 
-        simF32[0] = 0.016 / this.substeps; // dt per substep
-        simF32[1] = this.gravity;
+        const subDt = (0.016 * this.simSpeed) / this.substeps;
+
+        simF32[0] = subDt;
+        simF32[1] = this.gravity * 500;
         simF32[2] = this.damping;
         simF32[3] = this.restitution;
 
-        simF32[4] = this.alpha;
-        simF32[5] = this.beta;
-        simF32[6] = this.mousePower;
-        simF32[7] = this.mouseRadius;
+        simF32[4] = this.mouse ? this.mouse.x : 0;
+        simF32[5] = this.mouse ? this.mouse.y : 0;
+        simF32[6] = this.mouseRadius || 200;
+        simF32[7] = this.mousePower || 250;
 
-        simF32[8] = this.mouse ? this.mouse.x : 0;
-        simF32[9] = this.mouse ? this.mouse.y : 0;
+        simF32[8] = (this.mouse ? this.mouse.dx : 0) / this.substeps;
+        simF32[9] = (this.mouse ? this.mouse.dy : 0) / this.substeps;
         simU32[10] = this.mouse ? this.mouse.buttons : 0;
-        simF32[11] = this.width;
+        simU32[11] = this.iterations;
 
-        simF32[12] = this.height;
-        simU32[13] = this.substeps;
-        simU32[14] = this.iterations;
-        simF32[15] = 0; // Padding
+        simF32[12] = this.alpha;
+        simU32[13] = this.obstacleCount;
+        simU32[14] = this.gravityType;
+        simF32[15] = this.blackHoleGravity;
+
+        simF32[16] = this.blackHoleSwirl;
+        simF32[17] = this.blackHoleRadius;
+        simF32[18] = this.blackHoleRepulsion;
+        simF32[19] = this.beta;
 
         this.device.queue.writeBuffer(this.simParamsBuffer, 0, simData);
 
@@ -1187,38 +1200,33 @@ export class AVBDSolver {
             // Also update PEGS if peg size changed
         }
 
-        // Real-time Peg Size Update
-        if (this.currentScene === 'galton' && this.galtonPegSize !== this.prevGaltonPegSize) {
-            this.prevGaltonPegSize = this.galtonPegSize;
-            const newPegRadius = this.galtonPegSize;
+        // Real-time Scene Geometry Updates
+        if (this.currentScene === 'galton') {
+            const spacingChanged = this.galtonBucketSpacing !== this.prevGaltonBucketSpacing;
+            const heightChanged = this.galtonBucketHeight !== this.prevGaltonBucketHeight;
+            const pegSizeChanged = this.galtonPegSize !== this.prevGaltonPegSize;
 
-            // Pegs are the first 'this.staticCount' particles.
-            // We need to update their radius (offset 4).
-            // Since staticCount is small (~200-300), we can do individual writes or one block write.
-            // Block write is better.
+            if (spacingChanged || heightChanged || pegSizeChanged) {
+                this.prevGaltonBucketSpacing = this.galtonBucketSpacing;
+                this.prevGaltonBucketHeight = this.galtonBucketHeight;
+                this.prevGaltonPegSize = this.galtonPegSize;
 
-            // We need to read the current data to preserve positions? 
-            // We have 'this.simData' but it might be stale.
-            // However, pegs are STATIC. Their positions don't change.
-            // So 'this.simData' for pegs IS valid (except maybe color if we changed it).
-            // Let's assume simData is valid for pegs.
-
-            for (let i = 0; i < this.staticCount; i++) {
-                const offset = i * 10;
-                this.simData[offset + 4] = newPegRadius;
+                // Re-initialize the scene to rebuild walls and pegs with new settings
+                // This is a "heavy" update but necessary for structural changes.
+                this.initParticles(this.currentScene);
+                return; // Exit checking other things since we just reset everything
             }
-
-            // Upload the updated peg data
-            // We can upload the whole chunk of static particles
-            const pegDataSize = this.staticCount * 40;
-            this.device.queue.writeBuffer(
-                this.particleBuffer,
-                0,
-                this.simData,
-                0,
-                this.staticCount * 10 // Element count
-            );
         }
+
+        // Auto-reinit Wave on density change
+        if (this.currentScene === 'wave') {
+            if (this.particleDensity !== this.prevParticleDensity) {
+                this.prevParticleDensity = this.particleDensity;
+                this.initParticles('wave');
+                return;
+            }
+        }
+
 
         // If ballRadius has changed, update all existing balls
         if (this.ballRadius !== this.prevBallRadius) {
@@ -1242,8 +1250,8 @@ export class AVBDSolver {
                     radiusData
                 );
 
-                // Update Mass (r^3)
-                const mass = Math.pow(newRadius, 3) * 0.01;
+                // Update Mass (r^2) - 2D Area
+                const mass = Math.pow(newRadius, 2) * 0.1;
                 const invMass = 1.0 / mass;
                 const massData = new Float32Array([mass, invMass]);
                 this.device.queue.writeBuffer(
@@ -1347,7 +1355,7 @@ export class AVBDSolver {
         // So we might need multiple passes or a clear shader.
         // For simplicity/performance, let's try to do it with multiple passes for now.
 
-        if (!this.paused) {
+        if (!this.paused && this.currentScene !== 'wave') {
             // 1. Clear Grid Counters & Build Grid (ONCE per frame)
             // This decouples broadphase from narrowphase for massive performance.
             commandEncoder.clearBuffer(this.gridCountersBuffer, 0, this.maxGridCells * 4);
@@ -1446,13 +1454,16 @@ export class AVBDSolver {
     setParticleCount(count) {
         this.particleCount = count;
 
-        // If in Galton scene, we might need to resize buffer if count increases
-        if (this.currentScene === 'galton') {
-            const neededTotal = this.staticCount + count;
-            if (neededTotal > this.maxParticles) {
-                // Resize with margin
-                this.resizeParticleBuffer(neededTotal + 5000);
-            }
+        // Check if we need to resize buffer
+        const neededTotal = this.staticCount + count;
+        if (neededTotal > this.maxParticles) {
+            // Resize with margin
+            this.resizeParticleBuffer(neededTotal + 5000);
+        }
+
+        // For scenes that use fixed particle distributions, we must re-init to fill the new count
+        if (this.currentScene === 'wave' || this.currentScene === 'grid' || this.currentScene === 'chaos') {
+            this.initParticles(this.currentScene);
         }
     }
 
@@ -1463,7 +1474,7 @@ export class AVBDSolver {
         const newBuffer = this.bufferManager.createBuffer(
             'particles',
             newBytes,
-            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_SRC
         );
 
         // Copy existing data

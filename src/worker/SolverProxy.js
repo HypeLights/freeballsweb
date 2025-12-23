@@ -4,7 +4,7 @@ export class SolverProxy {
 
         // Local cache of parameters for UI reads
         this._params = {
-            gravity: 4.0,
+            gravity: 6.0,
             restitution: 0.8,
             damping: 0.999,
             substeps: 12,
@@ -12,6 +12,9 @@ export class SolverProxy {
             mousePower: 250,
             mouseRadius: 200,
             simSpeed: 1.0,
+            alpha: 0.95,
+            beta: 10.0,
+            iterations: 4,
             bloomEnabled: true,
             aaEnabled: true,
             bloomStrength: 0.2,
@@ -22,14 +25,26 @@ export class SolverProxy {
             galtonSpawnRate: 5,
             galtonBucketHeight: 0, // Will be set by resize/init
             galtonBucketSpacing: 40,
-            fireworksSpawnRate: 3.0,
+            galtonPegSize: 3,
+            galtonSpawnerDistance: 100,
+            fireworksSpawnRate: 0.8,
             fireworksExplosionSize: 100,
-            fireworksRocketSpeed: 1.5,
+            fireworksExplosionSize: 100,
+            fireworksRocketSpeed: 1.0,
             fireworksExplosionSpeed: 1.0,
+            waveAmplitude: 24,
+            waveSpeed: 2.0,
+            waveFrequency: 3.0,
+            particleDensity: 13,
+            waveMode: 'interference',
             paused: false,
             emittedCount: 0,
             fps: 0,
-            colorScheme: 'rainbow'
+            colorScheme: 'rainbow',
+            mixerEnabled: false,
+            mixerMode: 'vortex',
+            mixerPower: 1500,
+            mixerSmash: false
         };
     }
 
@@ -70,7 +85,7 @@ export class SolverProxy {
 
     resetParams() {
         // Reset local cache to defaults (matching AVBDSolver)
-        this._params.gravity = 4.0;
+        this._params.gravity = 6.0;
         this._params.restitution = 0.8;
         this._params.damping = 0.999;
         this._params.substeps = 32;
@@ -84,9 +99,15 @@ export class SolverProxy {
         this._params.particleCount = 4000;
         this._params.galtonSpawnRate = 5;
         this._params.galtonBucketSpacing = 40;
-        this._params.fireworksSpawnRate = 3.0;
+        this._params.galtonPegSize = 3;
+        this._params.galtonSpawnerDistance = 100;
+        this._params.fireworksSpawnRate = 0.8;
         this._params.fireworksExplosionSize = 100;
-        this._params.fireworksRocketSpeed = 2.2; // Note: Overlay default was 2.2? AVBDSolver was 1.5?
+        this._params.fireworksRocketSpeed = 1.0;
+        this._params.waveAmplitude = 24;
+        this._params.waveSpeed = 2.0;
+        this._params.waveFrequency = 3.0;
+        this._params.particleDensity = 50;
 
         this.worker.postMessage({ type: 'RESET_PARAMS' });
     }

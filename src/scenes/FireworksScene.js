@@ -20,7 +20,8 @@ class Firework {
 
         // Launch Vector Variety
         // 1. Randomize X velocity more (wind/angle) - Spread of -75 to +75
-        const xVel = (Math.random() - 0.5) * 150;
+        const scale = this.solver.height / 2160.0;
+        const xVel = (Math.random() - 0.5) * 150 * scale;
 
         // 2. Randomize Speed Multiplier slightly so they don't all peak exactly at targetY
         const randomSpeed = speedMult * (0.9 + Math.random() * 0.2);
@@ -103,20 +104,21 @@ class Firework {
             const py = this.pos.y + Math.sin(anglePos) * distPos;
 
             // Velocity: Explosion burst
+            const scale = this.solver.height / 2160.0;
             let angle, speed;
 
             if (type < 0.2) {
                 // Spherical Burst (Classic)
                 angle = Math.random() * Math.PI * 2;
-                speed = (10 + Math.random() * 50) * expSpeedMult;
+                speed = (10 + Math.random() * 50) * expSpeedMult * scale;
             } else if (type < 0.4) {
                 // Ring Burst
                 angle = (i / count) * Math.PI * 2;
-                speed = (40 + Math.random() * 20) * expSpeedMult;
+                speed = (40 + Math.random() * 20) * expSpeedMult * scale;
             } else if (type < 0.6) {
                 // Double Ring
                 angle = Math.random() * Math.PI * 2;
-                speed = ((i % 2 === 0) ? 30 : 60) * expSpeedMult;
+                speed = ((i % 2 === 0) ? 30 : 60) * expSpeedMult * scale;
             } else if (type < 0.8) {
                 // Spiral / Galaxy
                 // Angle increases with index
@@ -124,14 +126,14 @@ class Firework {
                 const armOffset = (i % arms) * (Math.PI * 2 / arms);
                 const spiral = (i / count) * Math.PI * 2; // Full rotation along arm
                 angle = armOffset + spiral;
-                speed = (20 + (i / count) * 40) * expSpeedMult;
+                speed = (20 + (i / count) * 40) * expSpeedMult * scale;
             } else {
                 // Cross / Star
                 const points = 5;
                 const pointAngle = Math.floor(i / (count / points)) * (Math.PI * 2 / points);
                 // Spread slightly around the point angle
                 angle = pointAngle + (Math.random() - 0.5) * 0.5;
-                speed = (30 + Math.random() * 40) * expSpeedMult;
+                speed = (30 + Math.random() * 40) * expSpeedMult * scale;
             }
 
             // Radial Boost: Force particles away from center to reduce clumping
@@ -184,15 +186,15 @@ export class FireworksScene extends Scene {
         this.solver.obstacleCount = 0;
         this.solver.staticCount = 0;
         this.solver.gravityType = 0;
-        this.solver.gravity = 4.0;
-        this.solver.damping = 0.999; // Good air resistance
-        this.solver.restitution = 0.5;
+
+        // Removed forceful parameter overwrites (Gravity, Damping, Restitution)
+        // These are now handled by Overlay.js to ensure UI synchronization and preserve user changes.
 
         // User Request: Default ball size 2.0
         // Only apply if it's the generic default (10).
         // This allows users to keep custom values on Reset.
         if (this.solver.ballRadius === 10) {
-            this.solver.ballRadius = 2.0;
+            this.solver.ballRadius = 3.0; // User Request: 3.0
         }
         this.solver.cellSize = Math.max(20, this.solver.ballRadius * 2.5);
 
@@ -298,7 +300,8 @@ export class FireworksScene extends Scene {
 
         const startX = width * 0.2 + Math.random() * width * 0.6;
         const startY = height + 20; // Just below screen
-        const targetY = height * 0.1 + Math.random() * height * 0.4; // Upper half
+        // Lower the target height (increase Y value) to prevent hitting top edge
+        const targetY = height * 0.2 + Math.random() * height * 0.4; // 20% to 60% down from top
 
         const hue = Math.random() * 360;
         const color = this.solver.hslToRgb(hue, 1.0, 0.6);

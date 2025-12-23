@@ -82,6 +82,8 @@ export class GaltonScene extends Scene {
             // i=0 is left edge (0), i=numBins is right edge (width)
             const wallX = i * actualSpacing;
 
+            // Revert extension: Use standard height.
+            // The "Horizontal Force" shader logic now handles stability.
             this.solver.addObstacle(
                 obstacleData,
                 wallX, bucketY + bucketHeight / 2,
@@ -129,48 +131,61 @@ export class GaltonScene extends Scene {
                 const updateData = new Float32Array(updateBuffer);
                 const updateDataUint = new Uint32Array(updateBuffer);
 
-                // Ensure centerX is based on current window width
-                const centerX = this.solver.width / 2;
+                // Ensure centerX is aligned with a bin center, not a wall
+                const targetSpacing = this.solver.galtonBucketSpacing || 40;
+                const numBins = Math.round(this.solver.width / targetSpacing);
+                const actualSpacing = this.solver.width / numBins;
+
+                // Snap centerX to the nearest bin center
+                // Bin centers are at (i + 0.5) * actualSpacing
+                let centerBinIndex = Math.floor(this.solver.width / 2 / actualSpacing);
+                const alignedCenterX = (centerBinIndex + 0.5) * actualSpacing;
+
                 const spread = this.solver.galtonSpawnerDistance || 100;
+                // Removed snapping for smooth real-time updates
+                const alignedSpread = spread;
 
                 // 3 Spawner Positions (Top Middle)
                 const spawners = [
-                    centerX,
-                    centerX - spread,
-                    centerX + spread
+                    alignedCenterX,
+                    alignedCenterX - alignedSpread,
+                    alignedCenterX + alignedSpread
                 ];
 
                 // Initialize lastSpawnSimTimes if not exists
                 if (!this.solver.lastSpawnSimTimes) this.solver.lastSpawnSimTimes = [-1, -1, -1];
 
                 let actualEmitted = 0;
+                const launchSpeed = 150;
+                const clearanceDist = this.solver.ballRadius * 2.2;
+                const dynamicCoolDown = clearanceDist / launchSpeed;
 
                 for (let i = 0; i < countToEmit; i++) {
                     // Round-robin or random selection of spawner
                     let spawnerIdx = Math.floor(Math.random() * 3);
-
-                    // Robust Physics Clearance Check (GPU-based)
-                    // We use the 'spawnerBlocked' array updated from the GPU readback.
-                    // 0 = Free, 1 = Blocked
-
                     let safe = false;
 
                     // Try all 3 spawners
                     for (let attempt = 0; attempt < 3; attempt++) {
                         const tryIdx = (spawnerIdx + attempt) % 3;
 
-                        if (this.solver.spawnerBlocked[tryIdx] === 0) {
+                        // Check 1: GPU Grid Check
+                        const gpuFree = (this.solver.spawnerBlocked[tryIdx] === 0);
+
+                        // Check 2: Physics Clearance Check (Prevents self-overlap due to latency)
+                        const timeFree = (this.solver.simTime - this.solver.lastSpawnSimTimes[tryIdx]) > dynamicCoolDown;
+
+                        if (gpuFree && timeFree) {
                             spawnerIdx = tryIdx;
                             safe = true;
-                            // Mark as blocked locally to prevent multiple spawns in same frame
+                            // Mark as blocked locally/update time
                             this.solver.spawnerBlocked[spawnerIdx] = 1;
+                            this.solver.lastSpawnSimTimes[spawnerIdx] = this.solver.simTime;
                             break;
                         }
                     }
 
                     if (!safe) {
-                        // All spawners blocked by particles in the grid.
-                        // Skip this spawn.
                         continue;
                     }
 
@@ -182,14 +197,14 @@ export class GaltonScene extends Scene {
                     updateData[offset + 0] = spawnX + (Math.random() - 0.5) * 2;
                     updateData[offset + 1] = spawnY;
                     updateData[offset + 2] = (Math.random() - 0.5) * 2;
-                    updateData[offset + 3] = 10 + (Math.random() * 10); // Random downward velocity
+                    updateData[offset + 3] = launchSpeed + (Math.random() * 50); // Consistent fast launch
                     updateData[offset + 4] = this.solver.ballRadius;
 
                     // Use Uint view for color
                     updateDataUint[offset + 5] = this.solver.getColor(this.solver.emittedCount + actualEmitted, maxEmitted);
 
                     const r = this.solver.ballRadius;
-                    const mass = Math.pow(r, 3) * 0.01;
+                    const mass = Math.pow(r, 2) * 0.1;
                     updateData[offset + 6] = mass;
                     updateData[offset + 7] = 1.0 / mass;
                     updateData[offset + 8] = 0;

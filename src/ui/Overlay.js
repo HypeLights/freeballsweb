@@ -37,6 +37,41 @@ export class Overlay {
                 padding: 15px;
                 box-shadow: 0 4px 15px rgba(0,0,0,0.5);
                 font-family: 'Inter', sans-serif;
+                max-height: 85vh;
+                display: flex;
+                flex-direction: column;
+            }
+            .panel-header {
+                flex-shrink: 0;
+                position: sticky;
+                top: 0;
+                background: rgba(20, 20, 30, 0.98);
+                z-index: 10;
+                padding-bottom: 5px;
+                margin-bottom: 10px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .panel-content {
+                flex: 1;
+                overflow-y: auto;
+                overflow-x: hidden;
+                padding-right: 8px;
+            }
+            /* Themed Scrollbar */
+            .panel-content::-webkit-scrollbar {
+                width: 8px;
+            }
+            .panel-content::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 4px;
+            }
+            .panel-content::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, rgba(79, 172, 254, 0.6) 0%, rgba(142, 45, 226, 0.6) 100%);
+                border-radius: 4px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .panel-content::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, rgba(79, 172, 254, 0.8) 0%, rgba(142, 45, 226, 0.8) 100%);
             }
             .ui-panel h2 {
                 margin: 0 0 15px 0;
@@ -403,11 +438,14 @@ export class Overlay {
         const panel = document.createElement('div');
         panel.className = 'ui-panel';
         panel.innerHTML = `
-            <h2 id="app-logo">FreeBalls<span class="gpu-text">WEB</span> <span style="font-size: 0.4em; opacity: 0.5; vertical-align: bottom; margin-bottom: 4px; display: inline-block;">v1.0</span></h2>
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <button id="btn-about" class="toggle-ui-btn" style="flex: 1;">About</button>
-                <button id="btn-hide-ui" class="toggle-ui-btn" style="flex: 1;">Hide UI</button>
+            <div class="panel-header">
+                <h2 id="app-logo">FreeBalls<span class="gpu-text">WEB</span> <span style="font-size: 0.4em; opacity: 0.5; vertical-align: bottom; margin-bottom: 4px; display: inline-block;">v1.1</span></h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button id="btn-about" class="toggle-ui-btn" style="flex: 1;">About</button>
+                    <button id="btn-hide-ui" class="toggle-ui-btn" style="flex: 1;">Hide UI</button>
+                </div>
             </div>
+            <div class="panel-content">
             
             <div class="control-section">
                 <h3>Scene</h3>
@@ -443,10 +481,22 @@ export class Overlay {
             </div>
             
             <div class="control-section">
+                <h3>Particles</h3>
+                <div class="control-row">
+                    <label>Max Balls <span id="val-count">4000</span></label>
+                    <input type="range" id="inp-count" min="100" max="1000000" step="100" value="4000" />
+                </div>
+                <div class="control-row">
+                    <label>Ball Radius <span id="val-ball-radius">10</span></label>
+                    <input type="range" id="inp-ball-radius" min="1" max="30" step="0.5" value="10" />
+                </div>
+            </div>
+
+            <div class="control-section">
                 <h3>Physics</h3>
                 <div class="control-row">
-                    <label>Gravity <span id="val-gravity">4</span></label>
-                    <input type="range" id="inp-gravity" min="0" max="20" step="0.1" value="4" />
+                    <label>Gravity <span id="val-gravity">6</span></label>
+                    <input type="range" id="inp-gravity" min="0" max="20" step="0.1" value="6" />
                 </div>
                 <div class="control-row">
                     <label>Damping <span id="val-damping">0.999</span></label>
@@ -471,18 +521,6 @@ export class Overlay {
                 <div class="control-row">
                     <label>Iterations <span id="val-iterations">4</span></label>
                     <input type="range" id="inp-iterations" min="1" max="20" step="1" value="4" />
-                </div>
-            </div>
-
-            <div class="control-section">
-                <h3>Particles</h3>
-                <div class="control-row">
-                    <label>Max Balls <span id="val-count">4000</span></label>
-                    <input type="range" id="inp-count" min="100" max="1000000" step="100" value="4000" />
-                </div>
-                <div class="control-row">
-                    <label>Ball Radius <span id="val-ball-radius">10</span></label>
-                    <input type="range" id="inp-ball-radius" min="1" max="30" step="0.5" value="10" />
                 </div>
             </div>
 
@@ -526,6 +564,7 @@ export class Overlay {
                 <button id="btn-reset" class="action-btn" style="flex: 1;">Reset Sim</button>
                 <button id="btn-reset-params" class="action-btn" style="flex: 1;">Reset Params</button>
             </div>
+            </div>
         `;
         this.container.appendChild(panel);
 
@@ -545,6 +584,26 @@ export class Overlay {
         if (sceneSelect) {
             sceneSelect.addEventListener('change', (e) => {
                 this.currentScene = e.target.value;
+
+                // Enforce Scene Defaults
+                if (this.currentScene === 'fireworks') {
+                    this.solver.ballRadius = 3.0;
+                    this.solver.fireworksRocketSpeed = 1.0;
+                    this.solver.fireworksSpawnRate = 0.8;
+                    // Physics Defaults (Default Gravity 6.0)
+                    this.solver.gravity = 6.0;
+                    this.solver.damping = 0.999;
+                    this.solver.restitution = 0.5;
+                } else if (this.currentScene === 'wave') {
+                    // Wave needs many particles to fill screen
+                    this.solver.ballRadius = 3.0;
+                    this.solver.particleCount = 30000;
+                    this.solver.waveMode = 'interference'; // Default
+                } else if (this.currentScene === 'grid' || this.currentScene === 'chaos') {
+                    // Optional: Reset to standard defaults if needed, or leave as is
+                    if (this.solver.ballRadius === 3.0) this.solver.ballRadius = 10.0;
+                }
+
                 this.solver.initParticles(this.currentScene);
                 this.updateActiveScenePanel();
             });
@@ -686,10 +745,13 @@ export class Overlay {
             radiusInput.dispatchEvent(new Event('input'));
         }
 
-        // Set initial particle count slider to match solver default (if needed)
-        // Or better, update solver to match slider default (20000)
-        // The slider is at 20000 by default HTML.
-        this.solver.particleCount = 4000;
+        // Sync UI with Solver's current state (which may have been adapted for screen size)
+        const countSlider = document.getElementById('inp-count');
+        if (countSlider) {
+            countSlider.value = this.solver.particleCount;
+            const valSpan = document.getElementById('val-count');
+            if (valSpan) valSpan.textContent = this.solver.particleCount;
+        }
     }
 
     createLandingPage() {
@@ -929,6 +991,14 @@ export class Overlay {
             radiusInput.dispatchEvent(new Event('input'));
         }
 
+        // Sync Max Balls slider with current particle count
+        const maxBallsInput = document.getElementById('inp-count');
+        const maxBallsVal = document.getElementById('val-count');
+        if (maxBallsInput && maxBallsVal) {
+            maxBallsInput.value = this.solver.particleCount;
+            maxBallsVal.textContent = this.solver.particleCount;
+        }
+
         // Sync Physics Sliders
         const gravityInput = document.getElementById('inp-gravity');
         const gravityVal = document.getElementById('val-gravity');
@@ -1018,22 +1088,38 @@ export class Overlay {
 
             this.bindSlider('inp-galton-peg', 'val-galton-peg', v => {
                 this.solver.galtonPegSize = parseFloat(v);
-                // Real-time update handled in solver.update
             });
 
             this.bindSlider('inp-galton-rate', 'val-galton-rate', v => {
                 this.solver.galtonSpawnRate = parseFloat(v);
             });
 
-            this.bindSlider('inp-galton-bucket', 'val-galton-bucket', v => {
-                this.solver.galtonBucketSpacing = parseFloat(v);
-                this.solver.initParticles('galton');
-            });
+            // Manual binding for heavy operations (Bucket Spacing & Height)
+            // 1. Bucket Spacing: Update label on input, Re-init on change (release)
+            const bucketSlider = document.getElementById('inp-galton-bucket');
+            const bucketLabel = document.getElementById('val-galton-bucket');
+            if (bucketSlider && bucketLabel) {
+                bucketSlider.addEventListener('input', (e) => {
+                    bucketLabel.textContent = e.target.value;
+                });
+                bucketSlider.addEventListener('change', (e) => {
+                    this.solver.galtonBucketSpacing = parseFloat(e.target.value);
+                    this.solver.initParticles('galton');
+                });
+            }
 
-            this.bindSlider('inp-galton-height', 'val-galton-height', v => {
-                this.solver.galtonBucketHeight = parseFloat(v);
-                this.solver.initParticles('galton');
-            });
+            // 2. Bucket Height: Update label on input, Re-init on change (release)
+            const heightSlider = document.getElementById('inp-galton-height');
+            const heightLabel = document.getElementById('val-galton-height');
+            if (heightSlider && heightLabel) {
+                heightSlider.addEventListener('input', (e) => {
+                    heightLabel.textContent = e.target.value;
+                });
+                heightSlider.addEventListener('change', (e) => {
+                    this.solver.galtonBucketHeight = parseFloat(e.target.value);
+                    this.solver.initParticles('galton');
+                });
+            }
 
         } else if (this.currentScene === 'planetary') {
             panel.style.display = 'block';
@@ -1082,8 +1168,8 @@ export class Overlay {
             const rateRow = document.createElement('div');
             rateRow.className = 'control-row';
             rateRow.innerHTML = `
-                <label>Spawn Rate <span id="val-fw-rate">${this.solver.fireworksSpawnRate || 3.0}</span></label>
-                <input type="range" id="inp-fw-rate" min="0.1" max="20.0" step="0.1" value="${this.solver.fireworksSpawnRate || 3.0}" />
+                <label>Spawn Rate <span id="val-fw-rate">${this.solver.fireworksSpawnRate || 0.8}</span></label>
+                <input type="range" id="inp-fw-rate" min="0.1" max="20.0" step="0.1" value="${this.solver.fireworksSpawnRate || 0.8}" />
             `;
             content.appendChild(rateRow);
 
@@ -1100,8 +1186,8 @@ export class Overlay {
             const speedRow = document.createElement('div');
             speedRow.className = 'control-row';
             speedRow.innerHTML = `
-                <label>Rocket Speed <span id="val-fw-speed">${this.solver.fireworksRocketSpeed || 2.2}</span></label>
-                <input type="range" id="inp-fw-speed" min="0.5" max="3.0" step="0.1" value="${this.solver.fireworksRocketSpeed || 2.2}" />
+                <label>Rocket Speed <span id="val-fw-speed">${this.solver.fireworksRocketSpeed || 1.0}</span></label>
+                <input type="range" id="inp-fw-speed" min="0.5" max="3.0" step="0.1" value="${this.solver.fireworksRocketSpeed || 1.0}" />
             `;
             content.appendChild(speedRow);
 
@@ -1133,10 +1219,18 @@ export class Overlay {
             modeRow.innerHTML = `
                 <label>Wave Mode</label>
                 <select id="sel-wv-mode" class="scene-selector" style="margin-bottom: 10px;">
-                    <option value="ocean">Ocean Waves</option>
-                    <option value="ripple">Ripple Effect</option>
-                    <option value="sound">Sound Waves</option>
                     <option value="interference" selected>Interference</option>
+                    <option value="quantum">Quantum</option>
+                    <option value="plasma">Plasma</option>
+                    <option value="fractal">Fractal</option>
+                    <option value="electric">Electric</option>
+                    <option value="tornado">Tornado</option>
+                    <option value="vortex">Vortex</option>
+                    <option value="galaxy">Galaxy</option>
+                    <option value="diamond">Diamond</option>
+                    <option value="ripple">Ripple</option>
+                    <option value="sound">Sound</option>
+                    <option value="interference2">Simple</option>
                 </select>
             `;
             content.appendChild(modeRow);
@@ -1145,8 +1239,8 @@ export class Overlay {
             const densityRow = document.createElement('div');
             densityRow.className = 'control-row';
             densityRow.innerHTML = `
-                <label>Particle Density <span id="val-wv-density">10</span></label>
-                <input type="range" id="inp-wv-density" min="1" max="50" step="1" value="10" />
+                <label>Particle Density <span id="val-wv-density">${this.solver.particleDensity || 13}</span></label>
+                <input type="range" id="inp-wv-density" min="1" max="50" step="1" value="${this.solver.particleDensity || 13}" />
             `;
             content.appendChild(densityRow);
 
@@ -1156,20 +1250,20 @@ export class Overlay {
                 modeSelect.value = this.solver.currentSceneObject.waveMode;
             }
 
-            // Sync density with current scene state
+            // Sync density with current solver state (SolverProxy has particleDensity cached)
             const densityInput = document.getElementById('inp-wv-density');
             const densityValue = document.getElementById('val-wv-density');
-            if (densityInput && this.solver.currentSceneObject && this.solver.currentSceneObject.particleDensity !== undefined) {
-                densityInput.value = this.solver.currentSceneObject.particleDensity;
-                densityValue.textContent = this.solver.currentSceneObject.particleDensity;
+            if (densityInput && densityValue && this.solver.particleDensity !== undefined) {
+                densityInput.value = this.solver.particleDensity;
+                densityValue.textContent = this.solver.particleDensity;
             }
 
             // 1. Wave Amplitude
             const ampRow = document.createElement('div');
             ampRow.className = 'control-row';
             ampRow.innerHTML = `
-                <label>Wave Height <span id="val-wv-amp">200</span></label>
-                <input type="range" id="inp-wv-amp" min="50" max="600" step="10" value="200" />
+                <label>Wave Height <span id="val-wv-amp">24</span></label>
+                <input type="range" id="inp-wv-amp" min="0" max="50" step="1" value="24" />
             `;
             content.appendChild(ampRow);
 
@@ -1187,59 +1281,64 @@ export class Overlay {
             freqRow.className = 'control-row';
             freqRow.innerHTML = `
                 <label>Wave Frequency <span id="val-wv-freq">3.0</span></label>
-                <input type="range" id="inp-wv-freq" min="0.5" max="10.0" step="0.5" value="3.0" />
+                <input type="range" id="inp-wv-freq" min="0.1" max="10.0" step="0.1" value="3.0" />
             `;
             content.appendChild(freqRow);
 
-            // Mode selector binding (already declared above, just add listener)
+            // Mode selector binding (Active Scene Panel logic)
             if (modeSelect) {
+                if (this.solver.waveMode) modeSelect.value = this.solver.waveMode;
                 modeSelect.addEventListener('change', (e) => {
-                    if (this.solver.currentSceneObject && this.solver.currentSceneObject.waveMode !== undefined) {
-                        this.solver.currentSceneObject.waveMode = e.target.value;
-                    }
+                    this.solver.waveMode = e.target.value;
                 });
             }
 
             // Density binding - updates max balls and reinits scene
-            this.bindSlider('inp-wv-density', 'val-wv-density', v => {
-                if (this.solver.currentSceneObject && this.solver.currentSceneObject.particleDensity !== undefined) {
-                    this.solver.currentSceneObject.particleDensity = parseInt(v);
+            // Use direct reference since element was just created
+            const densitySlider = densityRow.querySelector('input');
+            const densityLabel = densityRow.querySelector('span');
+            if (densitySlider && densityLabel) {
+                // Update label only while dragging (no reinit)
+                densitySlider.addEventListener('input', (e) => {
+                    const v = parseInt(e.target.value);
+                    densityLabel.textContent = v;
+                });
 
-                    // Calculate required particle count for new density
-                    const gridSize = Math.floor(20 + (parseInt(v) - 1) * 4.2);
-                    const requiredParticles = gridSize * gridSize;
+                // Reinit scene only when slider is released
+                densitySlider.addEventListener('change', (e) => {
+                    const v = parseInt(e.target.value);
+                    densityLabel.textContent = v;
+                    this.solver.particleDensity = v;
 
-                    // Update max balls to accommodate new density
+                    // Calculate required particle count for new density (matches WaveScene.js formula)
+                    // totalParticles = 200 + (density - 1) * 2000
+                    const requiredParticles = 200 + (v - 1) * 2000;
+
+                    // Always expand max balls if needed to fit the density
                     if (requiredParticles > this.solver.particleCount) {
-                        this.solver.particleCount = Math.min(requiredParticles, 1000000); // Cap at 1M
+                        this.solver.particleCount = Math.min(requiredParticles, 1000000);
                         // Update the max balls slider if it exists
-                        const maxBallsSlider = document.getElementById('inp-max-balls');
-                        const maxBallsValue = document.getElementById('val-max-balls');
+                        const maxBallsSlider = document.getElementById('inp-count');
+                        const maxBallsValue = document.getElementById('val-count');
                         if (maxBallsSlider && maxBallsValue) {
                             maxBallsSlider.value = this.solver.particleCount;
                             maxBallsValue.textContent = this.solver.particleCount;
                         }
                     }
 
-                    this.solver.initParticles('wave'); // Reinit with new density
-                }
-            });
+                    this.solver.initParticles('wave'); // Reinit with new density on release
+                });
+            }
 
-            // Bindings - These update the scene object's properties
+            // Bindings - These update the scene object's properties directly via SolverProxy
             this.bindSlider('inp-wv-amp', 'val-wv-amp', v => {
-                if (this.solver.currentSceneObject && this.solver.currentSceneObject.waveAmplitude !== undefined) {
-                    this.solver.currentSceneObject.waveAmplitude = parseFloat(v);
-                }
+                this.solver.waveAmplitude = parseFloat(v);
             });
             this.bindSlider('inp-wv-speed', 'val-wv-speed', v => {
-                if (this.solver.currentSceneObject && this.solver.currentSceneObject.waveSpeed !== undefined) {
-                    this.solver.currentSceneObject.waveSpeed = parseFloat(v);
-                }
+                this.solver.waveSpeed = parseFloat(v);
             });
             this.bindSlider('inp-wv-freq', 'val-wv-freq', v => {
-                if (this.solver.currentSceneObject && this.solver.currentSceneObject.waveFrequency !== undefined) {
-                    this.solver.currentSceneObject.waveFrequency = parseFloat(v);
-                }
+                this.solver.waveFrequency = parseFloat(v);
             });
 
         } else if (this.currentScene === 'collision') {
@@ -1272,6 +1371,7 @@ export class Overlay {
                     <option value="horizontal">Horizontal Shear</option>
                     <option value="chaos">Turbulence</option>
                     <option value="corners">Corner Rotation</option>
+                    <option value="smash">Smash</option>
                 </select>
             `;
             content.appendChild(modeRow);
@@ -1280,8 +1380,8 @@ export class Overlay {
             const powerRow = document.createElement('div');
             powerRow.className = 'control-row';
             powerRow.innerHTML = `
-                <label>Mix Power <span id="val-mixer-power">3000</span></label>
-                <input type="range" id="inp-mixer-power" min="100" max="5000" step="100" value="3000" />
+                <label>Mix Power <span id="val-mixer-power">1500</span></label>
+                <input type="range" id="inp-mixer-power" min="100" max="5000" step="100" value="1500" />
             `;
             content.appendChild(powerRow);
 
@@ -1305,83 +1405,61 @@ export class Overlay {
                 }
             };
 
-            // Mouse events
-            if (mixerButton && this.solver.currentSceneObject) {
+            // Mouse events - use solver directly (params sync to worker)
+            if (mixerButton) {
                 mixerButton.addEventListener('mousedown', () => {
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = true;
-                        this.solver.currentSceneObject.mixerSmash = true; // Enable Smash Mode
-                        setButtonActive(true);
-                    }
+                    this.solver.mixerEnabled = true;
+                    setButtonActive(true);
                 });
 
                 mixerButton.addEventListener('mouseup', () => {
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = false;
-                        this.solver.currentSceneObject.mixerSmash = false; // Disable Smash Mode
-                        setButtonActive(false);
-                    }
+                    this.solver.mixerEnabled = false;
+                    setButtonActive(false);
                 });
 
                 mixerButton.addEventListener('mouseleave', () => {
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = false;
-                        setButtonActive(false);
-                    }
+                    this.solver.mixerEnabled = false;
+                    setButtonActive(false);
                 });
 
                 // Touch events for mobile
                 mixerButton.addEventListener('touchstart', (e) => {
                     e.preventDefault();
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = true;
-                        this.solver.currentSceneObject.mixerSmash = true; // Enable Smash Mode
-                        setButtonActive(true);
-                    }
+                    this.solver.mixerEnabled = true;
+                    setButtonActive(true);
                 });
 
                 mixerButton.addEventListener('touchend', (e) => {
                     e.preventDefault();
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = false;
-                        this.solver.currentSceneObject.mixerSmash = false; // Disable Smash Mode
-                        setButtonActive(false);
-                    }
+                    this.solver.mixerEnabled = false;
+                    setButtonActive(false);
                 });
 
                 mixerButton.addEventListener('touchcancel', (e) => {
                     e.preventDefault();
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerEnabled = false;
-                        setButtonActive(false);
-                    }
+                    this.solver.mixerEnabled = false;
+                    setButtonActive(false);
                 });
             }
 
-            // Mixer mode selector binding
-            if (mixerModeSelect && this.solver.currentSceneObject) {
-                if (this.solver.currentSceneObject.mixerMode) {
-                    mixerModeSelect.value = this.solver.currentSceneObject.mixerMode;
-                }
+            // Mixer mode selector binding - use solver directly
+            if (mixerModeSelect) {
+                mixerModeSelect.value = this.solver.mixerMode || 'vortex';
                 mixerModeSelect.addEventListener('change', (e) => {
-                    if (this.solver.currentSceneObject) {
-                        this.solver.currentSceneObject.mixerMode = e.target.value;
-                    }
+                    this.solver.mixerMode = e.target.value;
                 });
             }
 
-            // Mixer power slider binding
+            // Mixer power slider binding - use solver directly
             this.bindSlider('inp-mixer-power', 'val-mixer-power', v => {
-                if (this.solver.currentSceneObject) {
-                    this.solver.currentSceneObject.mixerPower = parseFloat(v);
-                }
+                this.solver.mixerPower = parseFloat(v);
             });
 
-            // Sync mixer power display with current scene value
+            // Sync mixer power display with current solver value
             const mixerPowerInput = document.getElementById('inp-mixer-power');
             const mixerPowerValue = document.getElementById('val-mixer-power');
-            if (mixerPowerInput && mixerPowerValue && this.solver.currentSceneObject) {
-                const currentPower = this.solver.currentSceneObject.mixerPower || 3000;
+            if (mixerPowerInput && mixerPowerValue) {
+                const currentPower = this.solver.mixerPower || 3000;
                 mixerPowerInput.value = currentPower;
                 mixerPowerValue.textContent = currentPower;
             }
@@ -1447,8 +1525,10 @@ export class Overlay {
             let currentX, currentY, initialX, initialY;
 
             const dragStart = (e) => {
+                // Don't start drag if interacting with form controls or their containers
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' ||
-                    e.target.tagName === 'SELECT') return;
+                    e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL' ||
+                    e.target.closest('.control-row') || e.target.closest('.control-section')) return;
 
                 initialX = e.clientX - (panel.offsetLeft || 0);
                 initialY = e.clientY - (panel.offsetTop || 0);

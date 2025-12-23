@@ -39,7 +39,14 @@ self.onmessage = async (e) => {
             break;
         case 'UPDATE_PARAM':
             if (solver) {
+                // Direct property assignment for all params
                 solver[payload.key] = payload.value;
+
+                // Forward mixer params to CollisionScene
+                if (payload.key.startsWith('mixer') && solver.currentSceneObject) {
+                    solver.currentSceneObject[payload.key] = payload.value;
+                }
+
                 // Some params require immediate updateParams call
                 solver.updateParams();
             }
@@ -47,6 +54,12 @@ self.onmessage = async (e) => {
         case 'INIT_PARTICLES':
             if (solver) {
                 solver.initParticles(payload.scene);
+                self.postMessage({
+                    type: 'PARAMS_SYNC',
+                    payload: {
+                        particleCount: solver.particleCount
+                    }
+                });
             }
             break;
         case 'RESET_PARAMS':
@@ -77,6 +90,14 @@ async function init(canvas, width, height) {
         solver.resize(width, height);
 
         await solver.init();
+
+        // Sync initial params (like clamped particle count)
+        self.postMessage({
+            type: 'PARAMS_SYNC',
+            payload: {
+                particleCount: solver.particleCount
+            }
+        });
 
         console.log('Worker: Simulation Running');
         isRunning = true;

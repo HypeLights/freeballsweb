@@ -111,7 +111,11 @@ struct Obstacle {
     pos: vec2<f32>,
     halfSize: vec2<f32>,
     rotation: f32,
-    padding: vec3<f32>
+    // Use individual floats to prevent vec3 16-byte alignment forcing struct size to 48 bytes.
+    // We need standard 32-byte stride (8 floats).
+    pad1: f32,
+    pad2: f32,
+    pad3: f32
 };
 
 @group(0) @binding(2) var<storage, read> obstacles: array<Obstacle>;

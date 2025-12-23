@@ -67,6 +67,13 @@ async function init() {
         const { type, payload } = e.data;
         if (type === 'STATS') {
             if (solverProxy) solverProxy.updateStats(payload);
+        } else if (type === 'PARAMS_SYNC') {
+            if (solverProxy) {
+                Object.assign(solverProxy._params, payload);
+            }
+            if (overlay) {
+                overlay.updateAllSliders();
+            }
         }
     };
 }
@@ -109,14 +116,7 @@ function setupInput(canvas) {
         if (e.key.toLowerCase() === 'r') {
             if (solverProxy) solverProxy.initParticles(overlay ? overlay.currentScene : 'grid');
         }
-        if (e.code === 'Space') {
-            if (solverProxy) {
-                solverProxy.paused = !solverProxy.paused;
-                // Update UI checkbox if exists
-                const chk = document.getElementById('chk-pause-overlay');
-                if (chk) chk.checked = !solverProxy.paused; // Logic might be inverted in UI?
-            }
-        }
+
     });
 
     // Prevent context menu (Right Click)
